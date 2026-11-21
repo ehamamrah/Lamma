@@ -20,7 +20,11 @@ SELECT EXISTS (SELECT 1 FROM participants WHERE id = $1 AND meeting_id = $2) AS 
 SELECT id FROM participants WHERE meeting_id = $1 AND role = 'host' LIMIT 1;
 
 -- name: CountAdmittedGuests :one
-SELECT count(*) FROM participants WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted';
+-- Only recently active rows count, so idle scripted joins age out instead of
+-- permanently filling the cap (review SP4 re-verification).
+SELECT count(*) FROM participants
+WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted'
+  AND (in_room OR lease_until > now() OR status_at > now() - interval '30 minutes');
 
 -- name: RemoveGuest :one
 -- Single statement: guarded on role and status, returns the previous status.

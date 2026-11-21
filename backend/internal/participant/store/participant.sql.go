@@ -94,9 +94,13 @@ func (q *Queries) ClaimLease(ctx context.Context, arg ClaimLeaseParams) (ClaimLe
 }
 
 const countAdmittedGuests = `-- name: CountAdmittedGuests :one
-SELECT count(*) FROM participants WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted'
+SELECT count(*) FROM participants
+WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted'
+  AND (in_room OR lease_until > now() OR status_at > now() - interval '30 minutes')
 `
 
+// Only recently active rows count, so idle scripted joins age out instead of
+// permanently filling the cap (review SP4 re-verification).
 func (q *Queries) CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countAdmittedGuests, meetingID)
 	var count int64

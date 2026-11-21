@@ -149,3 +149,5 @@ Phase 2: SP-U1 (verify LiveKit TURN cannot relay to internal addresses).
 | BA4-7/8 | Low | Transport imported adapter; mute audited before success | Source whitelist in moderation; mute then audit |
 | BA4-9/10 | Low | Silent occupancy error; two-statement leave | Debug log; leave in one transaction |
 | BA4-12 | Info | `admission.wait` ~20 lines | **Accepted exception**: single `select` loop; splitting harms clarity |
+
+Re-verification: **PASS WITH CHANGES** — SP4-1 confirmed fixed live; one new Medium (admitted cap counted idle rows forever) fixed by counting only recently active admitted guests (30 min). **Phase 4 gate: passed.**

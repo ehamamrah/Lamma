@@ -19,7 +19,8 @@ export const api = {
   token: (code: string) => request<TokenGrant>('POST', `${m(code)}/token`),
   leave: (code: string) => request<void>('POST', `${m(code)}/leave`),
   chatHistory: (code: string) => request<{ messages: ChatMessage[] }>('GET', `${m(code)}/chat`),
-  sendChat: (code: string, text: string) => request<ChatMessage>('POST', `${m(code)}/chat`, { text }),
+  sendChat: (code: string, text: string) =>
+    request<ChatMessage>('POST', `${m(code)}/chat`, { text }),
 
   /** The caller's participant, or null without a session for this meeting. */
   me: async (code: string): Promise<Participant | null> => {
@@ -34,10 +35,13 @@ export const api = {
   host: {
     waiting: (code: string) =>
       request<{ participants: Participant[] }>('GET', `${m(code)}/participants?status=waiting`),
-    admit: (code: string, id: string) => request<void>('POST', `${m(code)}/participants/${id}/admit`),
+    admit: (code: string, id: string) =>
+      request<void>('POST', `${m(code)}/participants/${id}/admit`),
     deny: (code: string, id: string) => request<void>('POST', `${m(code)}/participants/${id}/deny`),
-    denyAll: (code: string) => request<{ denied: number }>('POST', `${m(code)}/participants/deny-waiting`),
-    remove: (code: string, id: string) => request<void>('POST', `${m(code)}/participants/${id}/remove`),
+    denyAll: (code: string) =>
+      request<{ denied: number }>('POST', `${m(code)}/participants/deny-waiting`),
+    remove: (code: string, id: string) =>
+      request<void>('POST', `${m(code)}/participants/${id}/remove`),
     mute: (code: string, id: string, source: MuteSource) =>
       request<void>('POST', `${m(code)}/participants/${id}/mute`, { source }),
     settings: (code: string, s: { locked?: boolean; waitingRoom?: boolean }) =>

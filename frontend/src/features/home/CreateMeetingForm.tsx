@@ -12,7 +12,12 @@ import { Switch } from '@/shared/ui/switch';
 
 export function CreateMeetingForm() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ displayName: '', title: '', password: '', waitingRoom: false });
+  const [form, setForm] = useState({
+    displayName: '',
+    title: '',
+    password: '',
+    waitingRoom: false,
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

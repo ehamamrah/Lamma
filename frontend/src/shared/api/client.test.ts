@@ -3,9 +3,11 @@ import { ApiError, errorMessage, request } from './client';
 function mockFetch(status: number, body: unknown, headers: Record<string, string> = {}) {
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue(
-      new Response(status === 204 ? null : JSON.stringify(body), { status, headers }),
-    ),
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(status === 204 ? null : JSON.stringify(body), { status, headers }),
+      ),
   );
 }
 

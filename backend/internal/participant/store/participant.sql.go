@@ -370,6 +370,32 @@ func (q *Queries) ListFreshWaiting(ctx context.Context, meetingID uuid.UUID) ([]
 	return items, nil
 }
 
+const listInRoomIDs = `-- name: ListInRoomIDs :many
+SELECT id FROM participants
+WHERE meeting_id = $1 AND in_room AND in_room_at < now() - interval '1 minute'
+`
+
+// Grace period: a participant_joined arriving during a sweep is not a ghost.
+func (q *Queries) ListInRoomIDs(ctx context.Context, meetingID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listInRoomIDs, meetingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockMeeting = `-- name: LockMeeting :one
 SELECT id, max_participants, locked, waiting_room
 FROM meetings
@@ -472,7 +498,7 @@ func (q *Queries) ReleaseLease(ctx context.Context, id uuid.UUID) error {
 
 const setParticipantStatus = `-- name: SetParticipantStatus :one
 UPDATE participants SET status = $3, status_at = now()
-WHERE id = $1 AND meeting_id = $2 AND status = ANY ($4::participant_status[])
+WHERE id = $1 AND meeting_id = $2 AND status::text = ANY ($4::text[])
 RETURNING id, meeting_id, display_name, role, status, status_at, in_room, in_room_at, livekit_sid, lease_until, lease_count, origin_hash, reconcile_after, session_hash, created_at
 `
 
@@ -480,7 +506,7 @@ type SetParticipantStatusParams struct {
 	ID           uuid.UUID
 	MeetingID    uuid.UUID
 	Status       ParticipantStatus
-	FromStatuses []ParticipantStatus
+	FromStatuses []string
 }
 
 func (q *Queries) SetParticipantStatus(ctx context.Context, arg SetParticipantStatusParams) (Participant, error) {

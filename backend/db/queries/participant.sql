@@ -18,7 +18,7 @@ SELECT * FROM participants WHERE id = $1;
 
 -- name: SetParticipantStatus :one
 UPDATE participants SET status = sqlc.arg(status), status_at = now()
-WHERE id = $1 AND meeting_id = $2 AND status = ANY (sqlc.arg(from_statuses)::participant_status[])
+WHERE id = $1 AND meeting_id = $2 AND status::text = ANY (sqlc.arg(from_statuses)::text[])
 RETURNING *;
 
 -- name: CountFreshWaiting :one
@@ -98,3 +98,8 @@ SELECT count(*) FROM participants WHERE in_room;
 -- name: InsertParticipantEvent :exec
 INSERT INTO moderation_events (meeting_id, actor_id, action, target_id)
 VALUES ($1, $2, $3, $4);
+
+-- name: ListInRoomIDs :many
+-- Grace period: a participant_joined arriving during a sweep is not a ghost.
+SELECT id FROM participants
+WHERE meeting_id = $1 AND in_room AND in_room_at < now() - interval '1 minute';

@@ -9,17 +9,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/ehamamrah/lamma/backend/internal/access"
 	"github.com/ehamamrah/lamma/backend/internal/health"
 	"github.com/ehamamrah/lamma/backend/internal/platform/clientip"
 	"github.com/ehamamrah/lamma/backend/internal/platform/config"
 	"github.com/ehamamrah/lamma/backend/internal/platform/httpx"
 	"github.com/ehamamrah/lamma/backend/internal/platform/ratelimit"
 )
-
-// module is implemented by every business module that exposes HTTP routes.
-type module interface {
-	Routes(r chi.Router)
-}
 
 // deps carries the cross-cutting components modules are built from.
 type deps struct {
@@ -36,9 +32,13 @@ func newServer(cfg config.Config, in *infra) *server {
 		limiter: ratelimit.New(in.redis, cfg.OriginHashKey, in.metrics.RateLimitRejections),
 		health:  newHealth(in),
 	}
-	mods, internal, workers := buildModules(d)
+	rts, workers, onShutdown := buildModules(d)
+	api := newHTTPServer(cfg.HTTPAddr, d.router(rts))
+	for _, fn := range onShutdown {
+		api.RegisterOnShutdown(fn)
+	}
 	return &server{
-		api:        newHTTPServer(cfg.HTTPAddr, d.router(mods, internal)),
+		api:        api,
 		metrics:    newHTTPServer(cfg.MetricsAddr, in.metrics.Handler()),
 		workers:    workers,
 		drain:      d.health.Drain,
@@ -60,21 +60,29 @@ func drainDelayFor(cfg config.Config) time.Duration {
 	return 0
 }
 
-func (d deps) router(mods []module, internal func(chi.Router)) http.Handler {
+func (d deps) router(rts routes) http.Handler {
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID, httpx.Recover, clientip.NewResolver(d.cfg.TrustedProxies).Middleware)
 	r.Use(httpx.Observe(d.infra.metrics), httpx.SecurityHeaders(d.cfg.IsProduction()))
 	r.Get("/health/live", d.health.Live)
 	r.Get("/health/ready", d.health.Ready)
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(httpx.CORS(d.cfg.CORSOrigins), httpx.SameOrigin(publicOrigin(d.cfg.PublicBaseURL), d.cfg.CORSOrigins))
-		r.Use(d.limiter.Middleware(ratelimit.Policy{Name: "general", Rate: d.cfg.Limits.General}, ratelimit.ByIP))
-		for _, m := range mods {
-			m.Routes(r)
+	r.Route("/api/v1", func(r chi.Router) { d.apiRoutes(r, rts) })
+	r.Route("/internal", rts.internal)
+	return otelhttp.NewHandler(r, "http", otelhttp.WithFilter(isTraced))
+}
+
+func (d deps) apiRoutes(r chi.Router, rts routes) {
+	r.Use(httpx.CORS(d.cfg.CORSOrigins), httpx.SameOrigin(publicOrigin(d.cfg.PublicBaseURL), d.cfg.CORSOrigins))
+	r.Use(d.limiter.Middleware(ratelimit.Policy{Name: "general", Rate: d.cfg.Limits.General}, ratelimit.ByIP))
+	for _, register := range rts.root {
+		register(r)
+	}
+	r.Route("/meetings/{code}", func(r chi.Router) {
+		r.Use(access.LoadPrincipal(rts.resolver, access.Cookies{Secure: d.cfg.CookieSecure}))
+		for _, register := range rts.scoped {
+			register(r)
 		}
 	})
-	r.Route("/internal", internal)
-	return otelhttp.NewHandler(r, "http", otelhttp.WithFilter(isTraced))
 }
 
 func isTraced(r *http.Request) bool {

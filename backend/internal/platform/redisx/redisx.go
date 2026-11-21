@@ -61,7 +61,7 @@ func (h metricsHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.P
 
 func (h metricsHook) observe(op string, start time.Time, err error) {
 	h.latency.WithLabelValues(op).Observe(time.Since(start).Seconds())
-	if err != nil && !errors.Is(err, redis.Nil) {
+	if err != nil && !errors.Is(err, redis.Nil) && !errors.Is(err, context.Canceled) {
 		h.errs.Inc()
 	}
 }

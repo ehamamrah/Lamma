@@ -4,6 +4,7 @@ package httpx
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"math"
 	"mime"
@@ -84,7 +85,7 @@ func Decode(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := dec.Decode(dst); err != nil {
 		return errBadJSON
 	}
-	if dec.More() {
+	if dec.Decode(&struct{}{}) != io.EOF {
 		return errBadJSON
 	}
 	return nil

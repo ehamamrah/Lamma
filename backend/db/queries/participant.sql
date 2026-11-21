@@ -1,0 +1,100 @@
+-- name: LockMeeting :one
+-- Serialises joins / seat claims per meeting (PLAN.md §6 Transactions).
+SELECT id, max_participants, locked, waiting_room
+FROM meetings
+WHERE id = $1 AND status = 'active' AND expires_at > now()
+FOR UPDATE;
+
+-- name: InsertParticipant :one
+INSERT INTO participants (id, meeting_id, display_name, role, status, origin_hash, session_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: GetParticipant :one
+SELECT * FROM participants WHERE id = $1 AND meeting_id = $2;
+
+-- name: GetParticipantByID :one
+SELECT * FROM participants WHERE id = $1;
+
+-- name: SetParticipantStatus :one
+UPDATE participants SET status = sqlc.arg(status), status_at = now()
+WHERE id = $1 AND meeting_id = $2 AND status = ANY (sqlc.arg(from_statuses)::participant_status[])
+RETURNING *;
+
+-- name: CountFreshWaiting :one
+SELECT count(*) FILTER (WHERE origin_hash = sqlc.arg(origin_hash)) AS by_origin,
+       count(*) AS total
+FROM participants
+WHERE meeting_id = $1 AND status = 'waiting' AND status_at > now() - interval '10 minutes';
+
+-- name: ListFreshWaiting :many
+SELECT * FROM participants
+WHERE meeting_id = $1 AND status = 'waiting' AND status_at > now() - interval '10 minutes'
+ORDER BY status_at
+LIMIT 100;
+
+-- name: DenyAllWaiting :many
+UPDATE participants SET status = 'denied', status_at = now()
+WHERE meeting_id = $1 AND status = 'waiting'
+RETURNING id;
+
+-- name: CountSeats :one
+-- A seat is held by admitted guests that are connected or hold a live lease.
+-- Hosts are exempt (PLAN.md §6 Seats).
+SELECT count(*) FILTER (WHERE TRUE) AS total,
+       count(*) FILTER (WHERE origin_hash = sqlc.arg(origin_hash) AND NOT in_room) AS unconnected_by_origin
+FROM participants
+WHERE meeting_id = $1 AND id <> sqlc.arg(exclude_id) AND role = 'guest'
+  AND status = 'admitted' AND (in_room OR lease_until > now());
+
+-- name: ClaimLease :one
+UPDATE participants
+SET lease_until = now() + sqlc.arg(ttl)::interval,
+    lease_count = CASE WHEN in_room THEN lease_count ELSE lease_count + 1 END
+WHERE id = $1 AND status = 'admitted'
+RETURNING lease_count, in_room;
+
+-- name: ReleaseLease :exec
+UPDATE participants SET lease_until = now() WHERE id = $1;
+
+-- name: AnyoneInRoom :one
+SELECT EXISTS (SELECT 1 FROM participants WHERE meeting_id = $1 AND in_room) AS in_room;
+
+-- name: MarkJoined :one
+-- Webhook participant_joined: always record presence (a fact), ordered by event time.
+UPDATE participants
+SET in_room = true, in_room_at = sqlc.arg(event_at), livekit_sid = sqlc.arg(sid), lease_count = 0
+WHERE id = $1 AND (in_room_at IS NULL OR in_room_at <= sqlc.arg(event_at))
+RETURNING meeting_id, status;
+
+-- name: MarkLeft :execrows
+UPDATE participants SET in_room = false, in_room_at = sqlc.arg(event_at)
+WHERE id = $1 AND livekit_sid = sqlc.arg(sid)
+  AND (in_room_at IS NULL OR in_room_at <= sqlc.arg(event_at));
+
+-- name: MarkRoomEmpty :exec
+UPDATE participants SET in_room = false WHERE meeting_id = $1 AND in_room;
+
+-- name: MarkNotInRoom :exec
+UPDATE participants SET in_room = false WHERE id = $1;
+
+-- name: ClaimIntruders :many
+UPDATE participants SET reconcile_after = now() + interval '1 minute'
+WHERE id IN (
+  SELECT id FROM participants
+  WHERE in_room AND status <> 'admitted'
+    AND (reconcile_after IS NULL OR reconcile_after < now())
+  LIMIT 50
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, meeting_id;
+
+-- name: ListAdmittedIDs :many
+SELECT id FROM participants WHERE meeting_id = $1 AND status = 'admitted';
+
+-- name: CountInRoom :one
+SELECT count(*) FROM participants WHERE in_room;
+
+-- name: InsertParticipantEvent :exec
+INSERT INTO moderation_events (meeting_id, actor_id, action, target_id)
+VALUES ($1, $2, $3, $4);

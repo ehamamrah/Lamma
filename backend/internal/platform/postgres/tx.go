@@ -20,7 +20,10 @@ type DBTX interface {
 type txKey struct{}
 
 // TxManager runs functions in a transaction carried by the context, so that
-// services can compose several module stores atomically without importing pgx.
+// services stay free of pgx. Rules: stores obtain their connection only via
+// Conn(ctx); a transaction may span modules only through service calls (never
+// another module's store); fn must not perform network calls (LiveKit, Redis)
+// and must not share ctx with other goroutines.
 type TxManager struct {
 	pool *pgxpool.Pool
 }
@@ -37,6 +40,12 @@ func (m *TxManager) InTx(ctx context.Context, fn func(ctx context.Context) error
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = rollback(tx)
+			panic(p)
+		}
+	}()
 	if err := fn(context.WithValue(ctx, txKey{}, tx)); err != nil {
 		return errors.Join(err, rollback(tx))
 	}

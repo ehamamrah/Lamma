@@ -1,0 +1,42 @@
+# One generated package per module so modules cannot call each other's
+# queries (PLAN.md §6, ADR-012). Regenerate: scripts/sqlc.sh
+version: "2"
+overrides:
+  go:
+    overrides:
+      - db_type: uuid
+        go_type: github.com/google/uuid.UUID
+      - db_type: uuid
+        nullable: true
+        go_type:
+          import: github.com/google/uuid
+          type: UUID
+          pointer: true
+      - db_type: timestamptz
+        go_type: time.Time
+      - db_type: timestamptz
+        nullable: true
+        go_type:
+          type: time.Time
+          pointer: true
+      - db_type: text
+        nullable: true
+        go_type:
+          type: string
+          pointer: true
+sql:
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/meeting.sql
+    gen:
+      go: { package: store, out: internal/meeting/store, sql_package: pgx/v5, emit_empty_slices: true }
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/participant.sql
+    gen:
+      go: { package: store, out: internal/participant/store, sql_package: pgx/v5, emit_empty_slices: true }
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/access.sql
+    gen:
+      go: { package: store, out: internal/access/store, sql_package: pgx/v5, emit_empty_slices: true }

@@ -17,7 +17,8 @@ CREATE TABLE meetings (
   room_created_at  timestamptz,
   room_closed_at   timestamptz,
   reconcile_after  timestamptz,
-  sweep_after      timestamptz
+  sweep_after      timestamptz,
+  CONSTRAINT meetings_ended_consistent CHECK ((status = 'ended') = (ended_at IS NOT NULL))
 );
 
 CREATE INDEX meetings_expiry_active ON meetings (expires_at) WHERE status = 'active';
@@ -55,10 +56,23 @@ CREATE INDEX participants_unauthorized_in_room ON participants (reconcile_after)
 CREATE TABLE moderation_events (
   id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   meeting_id  uuid NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
-  actor_id    uuid REFERENCES participants (id) ON DELETE CASCADE,
-  action      text NOT NULL,
-  target_id   uuid REFERENCES participants (id) ON DELETE CASCADE,
+  actor_id    uuid REFERENCES participants (id) ON DELETE SET NULL, -- NULL = system
+  action      text NOT NULL CHECK (action IN
+                ('admit', 'deny', 'deny_all', 'remove', 'mute', 'lock', 'unlock',
+                 'waiting_room_on', 'waiting_room_off', 'end')),
+  target_id   uuid REFERENCES participants (id) ON DELETE SET NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX moderation_events_meeting ON moderation_events (meeting_id, created_at);
+CREATE INDEX moderation_events_actor ON moderation_events (actor_id) WHERE actor_id IS NOT NULL;
+CREATE INDEX moderation_events_target ON moderation_events (target_id) WHERE target_id IS NOT NULL;
+
+-- The audit log is append-only for the application role.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lamma_app') THEN
+    REVOKE UPDATE, DELETE ON moderation_events FROM lamma_app;
+  END IF;
+END
+$$;

@@ -23,6 +23,7 @@ func Connect(ctx context.Context, url string, maxConns int) (*pgxpool.Pool, erro
 	cfg.HealthCheckPeriod = time.Minute
 	cfg.ConnConfig.RuntimeParams["application_name"] = "lamma-api"
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = "5000"
+	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "10000"
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)

@@ -33,7 +33,7 @@ func newServer(cfg config.Config, in *infra) *server {
 	d := deps{
 		cfg:     cfg,
 		infra:   in,
-		limiter: ratelimit.New(in.redis, in.metrics.RateLimitRejections),
+		limiter: ratelimit.New(in.redis, cfg.OriginHashKey, in.metrics.RateLimitRejections),
 		health:  newHealth(in),
 	}
 	mods, internal, workers := buildModules(d)
@@ -68,7 +68,7 @@ func (d deps) router(mods []module, internal func(chi.Router)) http.Handler {
 	r.Get("/health/ready", d.health.Ready)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(httpx.CORS(d.cfg.CORSOrigins), httpx.SameOrigin(publicOrigin(d.cfg.PublicBaseURL), d.cfg.CORSOrigins))
-		r.Use(d.limiter.Middleware(d.policy("general", d.cfg.Limits.General, false), ratelimit.ByIP))
+		r.Use(d.limiter.Middleware(ratelimit.Policy{Name: "general", Rate: d.cfg.Limits.General}, ratelimit.ByIP))
 		for _, m := range mods {
 			m.Routes(r)
 		}
@@ -77,11 +77,9 @@ func (d deps) router(mods []module, internal func(chi.Router)) http.Handler {
 	return otelhttp.NewHandler(r, "http", otelhttp.WithFilter(isTraced))
 }
 
-func (d deps) policy(name string, rate config.Rate, failClosed bool) ratelimit.Policy {
-	return ratelimit.Policy{Name: name, Rate: rate, FailClosed: failClosed}
+func isTraced(r *http.Request) bool {
+	return r.URL.Path != "/health/live" && r.URL.Path != "/health/ready"
 }
-
-func isTraced(r *http.Request) bool { return r.URL.Path != "/health/live" && r.URL.Path != "/health/ready" }
 
 func publicOrigin(base string) string {
 	u, err := url.Parse(base)

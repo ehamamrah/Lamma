@@ -72,7 +72,8 @@ func (s *Service) evaluate(ctx context.Context) report {
 func (s *Service) runChecks(ctx context.Context) report {
 	rep := report{Ready: true, Dependencies: make(map[string]string, len(s.checks))}
 	for _, c := range s.checks {
-		probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		// Detached: a client hanging up must not cache a false "down".
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 500*time.Millisecond)
 		err := c.Probe(probeCtx)
 		cancel()
 		rep.Dependencies[c.Name] = "up"

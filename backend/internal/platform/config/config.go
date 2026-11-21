@@ -97,7 +97,7 @@ func LoadFrom(lookup func(string) (string, bool)) (Config, error) {
 
 func loadApp(r *reader) Config {
 	return Config{
-		Env:                 r.str("APP_ENV", "development"),
+		Env:                 r.str("APP_ENV", "production"), // fail safe: guards on by default
 		LogLevel:            parseLevel(r, r.str("LOG_LEVEL", "info")),
 		HTTPAddr:            r.str("HTTP_ADDR", ":8000"),
 		MetricsAddr:         r.str("METRICS_ADDR", ":9090"),

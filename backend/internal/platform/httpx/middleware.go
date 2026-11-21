@@ -41,19 +41,23 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-// Recover converts panics into 500 responses and logs the stack.
+// Recover converts panics into 500 responses (unless a response has already
+// started) and logs the stack.
 func Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		defer func() {
 			if v := recover(); v != nil {
 				if v == http.ErrAbortHandler {
 					panic(v)
 				}
 				slog.ErrorContext(r.Context(), "panic", slog.Any("panic", v), slog.String("stack", string(debug.Stack())))
-				Error(w, r, apperr.New(apperr.KindInternal, "internal", "Something went wrong."))
+				if ww.Status() == 0 {
+					Error(ww, r, apperr.New(apperr.KindInternal, "internal", "Something went wrong."))
+				}
 			}
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(ww, r)
 	})
 }
 
@@ -141,6 +145,7 @@ func originAllowed(r *http.Request, origins []string) bool {
 func CORS(allowed []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add("Vary", "Origin")
 			origin := r.Header.Get("Origin")
 			if origin == "" || !slices.Contains(allowed, origin) {
 				next.ServeHTTP(w, r)
@@ -162,5 +167,4 @@ func writeCORSHeaders(h http.Header, origin string) {
 	h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 	h.Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID")
 	h.Set("Access-Control-Max-Age", "600")
-	h.Add("Vary", "Origin")
 }

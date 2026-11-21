@@ -21,7 +21,7 @@ func newTestLimiter(t *testing.T) (*Limiter, *miniredis.Miniredis) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
 	t.Cleanup(func() { _ = rdb.Close() })
 	rej := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "x"}, []string{"policy"})
-	return New(rdb, rej), mr
+	return New(rdb, []byte("test-secret"), rej), mr
 }
 
 func TestAllowEnforcesRatePerKey(t *testing.T) {
@@ -68,7 +68,7 @@ func TestRedisOutageFailureModes(t *testing.T) {
 		wantKind   apperr.Kind
 		wantErr    bool
 	}{
-		{"fail-open degrades to local limiter", false, 0, false},
+		{"fail-open degrades to per-client local limiter", false, 0, false},
 		{"fail-closed rejects with 503", true, apperr.KindUnavailable, true},
 	}
 	for _, tt := range tests {
@@ -81,5 +81,21 @@ func TestRedisOutageFailureModes(t *testing.T) {
 				t.Fatalf("got %v", err)
 			}
 		})
+	}
+}
+
+func TestFallbackIsPerClient(t *testing.T) {
+	l, mr := newTestLimiter(t)
+	mr.Close()
+	p := Policy{Name: "g", Rate: config.Rate{Count: 2, Period: time.Minute}}
+	ctx := context.Background()
+	for range 2 {
+		_ = l.Allow(ctx, p, "abuser")
+	}
+	if err := l.Allow(ctx, p, "abuser"); !apperr.IsKind(err, apperr.KindRateLimited) {
+		t.Fatalf("abuser should be limited in degraded mode, got %v", err)
+	}
+	if err := l.Allow(ctx, p, "victim"); err != nil {
+		t.Fatalf("other clients must keep their own budget in degraded mode: %v", err)
 	}
 }

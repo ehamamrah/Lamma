@@ -47,8 +47,13 @@ func validateProduction(c Config) []error {
 	if len(c.TrustedProxies) == 0 {
 		errs = append(errs, fmt.Errorf("TRUSTED_PROXY_CIDRS: required in production"))
 	}
-	if !strings.HasPrefix(c.PublicBaseURL, "https://") {
-		errs = append(errs, fmt.Errorf("PUBLIC_BASE_URL: must be https in production"))
+	if !strings.HasPrefix(c.PublicBaseURL, "https://") || !strings.HasPrefix(c.LiveKit.PublicURL, "wss://") {
+		errs = append(errs, fmt.Errorf("PUBLIC_BASE_URL/LIVEKIT_PUBLIC_URL: must use https/wss in production"))
+	}
+	for _, o := range c.CORSOrigins {
+		if !strings.HasPrefix(o, "https://") {
+			errs = append(errs, fmt.Errorf("CORS_ALLOWED_ORIGINS: %q must be https in production", o))
+		}
 	}
 	return errs
 }

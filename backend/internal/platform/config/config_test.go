@@ -37,7 +37,7 @@ func baseEnv() map[string]string {
 		"LIVEKIT_URL": "http://lk", "LIVEKIT_PUBLIC_URL": "ws://lk",
 		"LIVEKIT_API_KEY": "k", "LIVEKIT_API_SECRET": "lamma-dev-only-livekit-secret-0123456789",
 		"ORIGIN_HASH_KEY": "lamma-dev-only-origin-hash-key-0123456789",
-		"COOKIE_SECURE": "false",
+		"COOKIE_SECURE":   "false", "APP_ENV": "development",
 	}
 }
 
@@ -80,6 +80,7 @@ func TestProductionGuards(t *testing.T) {
 			strongSecrets(e)
 			e["COOKIE_SECURE"], e["TRUSTED_PROXY_CIDRS"] = "true", "10.0.0.5/32"
 			e["PUBLIC_BASE_URL"] = "https://meet.example.com"
+			e["LIVEKIT_PUBLIC_URL"] = "wss://rtc.example.com"
 		}, ""},
 	}
 	for _, tt := range tests {

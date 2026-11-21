@@ -84,7 +84,8 @@ func migrateCmd(args []string) error {
 	return nil
 }
 
-// healthcheck lets distroless containers probe liveness without curl.
+// healthcheck lets distroless containers probe liveness without curl. The
+// container port is fixed at 8000 (HTTP_ADDR is not meant to change in images).
 func healthcheck(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

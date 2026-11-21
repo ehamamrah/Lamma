@@ -34,6 +34,7 @@ type Breaker struct {
 // NewBreaker creates a breaker that trips on consecutive failures or a high
 // failure ratio, and probes recovery with a few half-open requests.
 func NewBreaker(s Settings) *Breaker {
+	s = withDefaults(s)
 	cb := gobreaker.NewCircuitBreaker[any](gobreaker.Settings{
 		Name:         s.Name,
 		MaxRequests:  3,
@@ -48,6 +49,22 @@ func NewBreaker(s Settings) *Breaker {
 		},
 	})
 	return &Breaker{cb: cb, timeout: s.CallTimeout}
+}
+
+func withDefaults(s Settings) Settings {
+	if s.CallTimeout <= 0 {
+		s.CallTimeout = 3 * time.Second
+	}
+	if s.OpenTimeout <= 0 {
+		s.OpenTimeout = 30 * time.Second
+	}
+	if s.FailureThreshold == 0 {
+		s.FailureThreshold = 5
+	}
+	if s.IsSuccessful == nil {
+		s.IsSuccessful = func(err error) bool { return err == nil || errors.Is(err, context.Canceled) }
+	}
+	return s
 }
 
 func tripper(threshold uint32) func(gobreaker.Counts) bool {

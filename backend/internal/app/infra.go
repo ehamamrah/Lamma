@@ -19,10 +19,10 @@ import (
 
 // infra holds process-wide infrastructure clients, closed in reverse order.
 type infra struct {
-	metrics  *metrics.Metrics
-	pool     *pgxpool.Pool
-	redis    *redis.Client
-	tracing  telemetry.Shutdown
+	metrics *metrics.Metrics
+	pool    *pgxpool.Pool
+	redis   *redis.Client
+	tracing telemetry.Shutdown
 }
 
 func openInfra(ctx context.Context, cfg config.Config) (*infra, error) {

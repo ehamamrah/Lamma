@@ -92,3 +92,33 @@ security-performance-reviewer: SP-1, 4, 5, 8–12, 14, 15 resolved; remaining/ne
 
 **Phase 1 gate: passed.** No unresolved Critical/High findings. Open item carried to
 Phase 2: SP-U1 (verify LiveKit TURN cannot relay to internal addresses).
+
+## Phase 2–3 — Infrastructure & backend foundation
+
+- backend-architect: **APPROVE WITH CHANGES** (no Critical/High).
+- security-performance-reviewer: **PASS WITH CHANGES** (no Critical/High).
+
+| # | Sev | Finding | Resolution |
+| --- | --- | --- | --- |
+| BA-1 | Med | gofmt drift | `gofmt -w`; CI enforces |
+| BA-2 | Med | `InTx` leaks tx on panic | Deferred rollback + re-panic |
+| BA-3 | Med | Implicit tx contract | Documented rules on `TxManager` (Conn-only, no network calls, cross-module only via services) |
+| BA-4 | Med | Breaker zero-value settings unsafe | `withDefaults` (3s timeout, threshold 5, cancel ≠ failure) |
+| BA-5 | Med | Services would import `ratelimit` (HTTP deps) | `ratelimit.Check` func port bound in app wiring via `Limiter.For` |
+| BA-6 | Low | Unused `apperr.Accepted` | Removed |
+| BA-7 | Low | Weak audit/meeting integrity | `action` CHECK, `ended_at`↔`status` CHECK, `ON DELETE SET NULL`, app role REVOKE UPDATE/DELETE on audit |
+| BA-8/9 | Low | Receiver-less method; fixed healthcheck port | Plain literal; port documented as fixed |
+| SP-1 | Med | TURN relay deny list implicit | Explicit RFC1918/loopback/link-local/CGNAT/ULA deny list |
+| SP-2 | Med | `APP_ENV` defaulted to development | Defaults to `production` (guards on) |
+| SP-3 | Med | Degraded limiter shared across clients | Per-client fallback, bounded to 10k keys |
+| SP-4 | Med | Blackholed Redis adds latency | 150ms budget per decision + 1s skip window after errors |
+| SP-5 | Med | Unindexed audit FKs | Partial indexes on `actor_id`, `target_id` |
+| SP-6 | Low | Prod guards incomplete | `wss://`/`https://` enforced for public URLs and CORS origins |
+| SP-7 | Low | Trailing JSON accepted | Second `Decode` must hit EOF |
+| SP-8 | Low | `Vary: Origin` conditional | Always set |
+| SP-9 | Low | Redis password in argv | Written to tmpfs config file |
+| SP-10 | Low | Data containers writable | `read_only` + tmpfs for Postgres/Redis. **Accepted:** images pinned by exact tag, digests deferred to release pipeline |
+| SP-11 | Low | No idle-in-tx timeout | `idle_in_transaction_session_timeout=10s` |
+| SP-12 | Low | Raw IPs in Redis keys | Keys are HMAC'd |
+| Handoffs | — | Recover after headers; detached readiness probes; cancel ≠ Redis error | All fixed |
+| SP-13 | Info | SSE write deadline / shutdown hook | Implemented in Phase 4 (admission hub) |

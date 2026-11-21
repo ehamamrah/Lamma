@@ -14,7 +14,7 @@ import (
 
 // PresenceSink records participant presence (participant module).
 type PresenceSink interface {
-	Joined(ctx context.Context, identity uuid.UUID, sid string, at time.Time) (authorized bool, err error)
+	Joined(ctx context.Context, meetingID, identity uuid.UUID, sid string, at time.Time) (authorized bool, err error)
 	Left(ctx context.Context, identity uuid.UUID, sid string, at time.Time) error
 	RoomFinished(ctx context.Context, meetingID uuid.UUID) error
 }
@@ -82,18 +82,27 @@ func (h *WebhookHandler) dispatch(ctx context.Context, ev *livekit.WebhookEvent)
 }
 
 func (h *WebhookHandler) joined(ctx context.Context, room string, p *livekit.ParticipantInfo, at time.Time) error {
-	id, err := uuid.Parse(p.GetIdentity())
-	authorized := false
-	if err == nil {
-		if authorized, err = h.presence.Joined(ctx, id, p.GetSid(), at); err != nil {
-			return err
-		}
+	authorized, err := h.authorize(ctx, room, p, at)
+	if err != nil {
+		return err
 	}
 	if authorized {
 		return nil
 	}
 	slog.WarnContext(ctx, "evicting unauthorized participant", slog.String("meeting_id", room))
 	return h.lk.RemoveParticipant(context.WithoutCancel(ctx), room, p.GetIdentity())
+}
+
+// authorize records presence; identities or rooms that are not ours are
+// unauthorized (this deployment runs no egress/agents, so every legitimate
+// identity is a participant UUID).
+func (h *WebhookHandler) authorize(ctx context.Context, room string, p *livekit.ParticipantInfo, at time.Time) (bool, error) {
+	meetingID, errRoom := uuid.Parse(room)
+	id, errID := uuid.Parse(p.GetIdentity())
+	if errRoom != nil || errID != nil {
+		return false, nil
+	}
+	return h.presence.Joined(ctx, meetingID, id, p.GetSid(), at)
 }
 
 func (h *WebhookHandler) left(ctx context.Context, p *livekit.ParticipantInfo, at time.Time) error {

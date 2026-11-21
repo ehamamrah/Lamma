@@ -13,8 +13,26 @@ RETURNING *;
 -- name: GetParticipant :one
 SELECT * FROM participants WHERE id = $1 AND meeting_id = $2;
 
--- name: GetParticipantByID :one
-SELECT * FROM participants WHERE id = $1;
+-- name: ParticipantExists :one
+SELECT EXISTS (SELECT 1 FROM participants WHERE id = $1 AND meeting_id = $2) AS found;
+
+-- name: GetHostID :one
+SELECT id FROM participants WHERE meeting_id = $1 AND role = 'host' LIMIT 1;
+
+-- name: CountAdmittedGuests :one
+SELECT count(*) FROM participants WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted';
+
+-- name: RemoveGuest :one
+-- Single statement: guarded on role and status, returns the previous status.
+WITH prev AS (
+  SELECT t.id, t.status FROM participants t
+  WHERE t.id = sqlc.arg(id) AND t.meeting_id = sqlc.arg(meeting_id) AND t.role = 'guest'
+    AND t.status IN ('admitted', 'waiting', 'left')
+  FOR UPDATE
+)
+UPDATE participants SET status = 'removed', status_at = now()
+FROM prev WHERE participants.id = prev.id
+RETURNING prev.status AS previous_status;
 
 -- name: SetParticipantStatus :one
 UPDATE participants SET status = sqlc.arg(status), status_at = now()
@@ -48,9 +66,16 @@ WHERE meeting_id = $1 AND id <> sqlc.arg(exclude_id) AND role = 'guest'
   AND status = 'admitted' AND (in_room OR lease_until > now());
 
 -- name: ClaimLease :one
+-- lease_count counts leases taken without connecting inside a sliding window:
+-- it restarts once the previous lease is long expired, so it can never lock a
+-- participant out for the meeting's lifetime (review SP4-1).
 UPDATE participants
-SET lease_until = now() + sqlc.arg(ttl)::interval,
-    lease_count = CASE WHEN in_room THEN lease_count ELSE lease_count + 1 END
+SET lease_count = CASE
+      WHEN in_room THEN 0
+      WHEN lease_until IS NULL OR lease_until < now() - interval '10 minutes' THEN 1
+      ELSE lease_count + 1
+    END,
+    lease_until = now() + sqlc.arg(ttl)::interval
 WHERE id = $1 AND status = 'admitted'
 RETURNING lease_count, in_room;
 
@@ -61,11 +86,13 @@ UPDATE participants SET lease_until = now() WHERE id = $1;
 SELECT EXISTS (SELECT 1 FROM participants WHERE meeting_id = $1 AND in_room) AS in_room;
 
 -- name: MarkJoined :one
--- Webhook participant_joined: always record presence (a fact), ordered by event time.
+-- Webhook participant_joined: always record presence (a fact), ordered by event
+-- time, and only for the room the participant belongs to.
 UPDATE participants
 SET in_room = true, in_room_at = sqlc.arg(event_at), livekit_sid = sqlc.arg(sid), lease_count = 0
-WHERE id = $1 AND (in_room_at IS NULL OR in_room_at <= sqlc.arg(event_at))
-RETURNING meeting_id, status;
+WHERE id = $1 AND meeting_id = sqlc.arg(meeting_id)
+  AND (in_room_at IS NULL OR in_room_at <= sqlc.arg(event_at))
+RETURNING status;
 
 -- name: MarkLeft :execrows
 UPDATE participants SET in_room = false, in_room_at = sqlc.arg(event_at)
@@ -89,8 +116,11 @@ WHERE id IN (
 )
 RETURNING id, meeting_id;
 
--- name: ListAdmittedIDs :many
-SELECT id FROM participants WHERE meeting_id = $1 AND status = 'admitted';
+-- name: FilterAdmitted :many
+-- Of the identities LiveKit reports as connected, which are admitted? Bounded
+-- by the room size, unlike listing every admitted row.
+SELECT id FROM participants
+WHERE meeting_id = $1 AND status = 'admitted' AND id = ANY (sqlc.arg(candidates)::uuid[]);
 
 -- name: CountInRoom :one
 SELECT count(*) FROM participants WHERE in_room;

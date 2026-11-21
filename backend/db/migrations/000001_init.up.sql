@@ -50,6 +50,7 @@ CREATE TABLE participants (
 );
 
 CREATE INDEX participants_meeting_status ON participants (meeting_id, status);
+CREATE INDEX participants_in_room ON participants (meeting_id) WHERE in_room;
 CREATE INDEX participants_unauthorized_in_room ON participants (reconcile_after)
   WHERE in_room AND status <> 'admitted';
 

@@ -15,6 +15,7 @@ import (
 
 type harness struct {
 	svc       *Service
+	seats     *Seats
 	store     *memStore
 	meetings  *fakeMeetings
 	notifier  *fakeNotifier
@@ -27,11 +28,16 @@ func newHarness(m meeting.Meeting, lock MeetingLock) *harness {
 	h := &harness{store: newMemStore(lock), meetings: &fakeMeetings{m: m},
 		notifier: &fakeNotifier{}, passwords: &fakePasswords{}}
 	h.svc = NewService(Deps{
-		Store: h.store, Meetings: h.meetings, Rooms: fakeRooms{}, Signer: fakeSigner{},
-		Notifier: h.notifier, Passwords: h.passwords, Tx: inlineTx{}, LeaseTTL: time.Minute,
+		Store: h.store, Meetings: h.meetings, Notifier: h.notifier, Passwords: h.passwords, Tx: inlineTx{},
 		PasswordLimit: func(context.Context, string) error { h.limitHits++; return h.limitErr },
 	})
+	h.seats = h.newSeats(fakeRooms{})
 	return h
+}
+
+func (h *harness) newSeats(rooms Rooms) *Seats {
+	return NewSeats(SeatDeps{Store: h.store, Meetings: h.meetings, Rooms: rooms, Signer: fakeSigner{},
+		Tx: inlineTx{}, LeaseTTL: time.Minute})
 }
 
 func testMeeting() meeting.Meeting {
@@ -187,7 +193,7 @@ func TestIssueToken(t *testing.T) {
 			h := newHarness(m, MeetingLock{})
 			h.store.seats, h.store.pending = tt.seats, tt.pending
 			p, _ := h.store.Insert(context.Background(), NewParticipant{MeetingID: m.ID, Role: tt.role, Status: access.StatusAdmitted})
-			grant, err := h.svc.IssueToken(context.Background(), principalFor(p, m))
+			grant, err := h.seats.IssueToken(context.Background(), principalFor(p, m))
 			if codeOf(err) != tt.wantCode || (err == nil && grant.Token == "") {
 				t.Fatalf("got %v", err)
 			}
@@ -204,7 +210,7 @@ func TestLeaseSquattingIsBounded(t *testing.T) {
 	p, _ := h.store.Insert(context.Background(), NewParticipant{MeetingID: m.ID, Role: access.RoleGuest, Status: access.StatusAdmitted})
 	var err error
 	for range maxLeasesWithoutConnecting + 1 {
-		_, err = h.svc.IssueToken(context.Background(), principalFor(p, m))
+		_, err = h.seats.IssueToken(context.Background(), principalFor(p, m))
 	}
 	if codeOf(err) != "too_many_pending" {
 		t.Fatalf("renewing leases without connecting must be capped, got %v", err)
@@ -214,11 +220,16 @@ func TestLeaseSquattingIsBounded(t *testing.T) {
 func TestIssueTokenLiveKitDown(t *testing.T) {
 	m := testMeeting()
 	h := newHarness(m, MeetingLock{})
-	h.svc.Rooms = fakeRooms{err: errors.New("connection refused")}
+	seats := h.newSeats(fakeRooms{err: errors.New("connection refused")})
 	p, _ := h.store.Insert(context.Background(), NewParticipant{MeetingID: m.ID, Role: access.RoleGuest, Status: access.StatusAdmitted})
-	_, err := h.svc.IssueToken(context.Background(), principalFor(p, m))
-	if appErr, _ := apperr.As(err); appErr == nil || appErr.Code != "livekit_unavailable" || appErr.RetryAfter == 0 {
-		t.Fatalf("want livekit_unavailable with Retry-After, got %v", err)
+	for range 5 {
+		_, err := seats.IssueToken(context.Background(), principalFor(p, m))
+		if appErr, _ := apperr.As(err); appErr == nil || appErr.Code != "livekit_unavailable" || appErr.RetryAfter == 0 {
+			t.Fatalf("want livekit_unavailable with Retry-After, got %v", err)
+		}
+	}
+	if h.store.leases[p.ID] != 0 {
+		t.Fatal("a LiveKit outage must not consume lease attempts (review SP4-1)")
 	}
 }
 
@@ -246,5 +257,26 @@ func TestModerationStateChanges(t *testing.T) {
 	}
 	if got := h.store.audits; len(got) != 2 || got[0] != "admit" || got[1] != "remove" {
 		t.Fatalf("audit trail = %v", got)
+	}
+}
+
+func TestHostNeverLockedOutByLeases(t *testing.T) {
+	m := testMeeting()
+	h := newHarness(m, MeetingLock{})
+	p, _ := h.store.Insert(context.Background(), NewParticipant{MeetingID: m.ID, Role: access.RoleHost, Status: access.StatusAdmitted})
+	for i := range 10 {
+		if _, err := h.seats.IssueToken(context.Background(), principalFor(p, m)); err != nil {
+			t.Fatalf("host token %d rejected: %v", i, err)
+		}
+	}
+}
+
+func TestAdmittedGuestRowsAreCapped(t *testing.T) {
+	m := testMeeting()
+	h := newHarness(m, MeetingLock{MaxParticipants: 2})
+	h.store.admitted = admittedFactor * 2
+	_, err := h.svc.Join(context.Background(), JoinInput{Code: m.Code, DisplayName: "G"})
+	if codeOf(err) != "meeting_full" {
+		t.Fatalf("got %v, want meeting_full", err)
 	}
 }

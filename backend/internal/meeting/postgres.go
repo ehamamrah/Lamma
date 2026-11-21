@@ -47,15 +47,6 @@ func (s *PGStore) GetOpenByCode(ctx context.Context, code string) (Meeting, erro
 	return toMeeting(row, err)
 }
 
-// Lookup returns an open meeting by canonical code; malformed codes are
-// rejected without a query.
-func (s *PGStore) Lookup(ctx context.Context, code string) (Meeting, error) {
-	if !ValidCode(code) {
-		return Meeting{}, apperr.ErrNotFound
-	}
-	return s.GetOpenByCode(ctx, code)
-}
-
 // GetOpenByID returns an active, unexpired meeting.
 func (s *PGStore) GetOpenByID(ctx context.Context, id uuid.UUID) (Meeting, error) {
 	row, err := s.q(ctx).GetOpenMeetingByID(ctx, id)

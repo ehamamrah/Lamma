@@ -11,7 +11,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ehamamrah/lamma/backend/internal/participant"
-	"github.com/ehamamrah/lamma/backend/internal/realtime"
 )
 
 type fakeMeetings struct {
@@ -47,8 +46,14 @@ func (f *fakeParts) MarkNotInRoom(_ context.Context, id uuid.UUID) error {
 	f.notInRoom = append(f.notInRoom, id)
 	return nil
 }
-func (f *fakeParts) AdmittedIDs(context.Context, uuid.UUID) ([]uuid.UUID, error) {
-	return f.admitted, nil
+func (f *fakeParts) FilterAdmitted(_ context.Context, _ uuid.UUID, c []uuid.UUID) ([]uuid.UUID, error) {
+	var out []uuid.UUID
+	for _, id := range c {
+		if slices.Contains(f.admitted, id) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 func (f *fakeParts) InRoomIDs(context.Context, uuid.UUID) ([]uuid.UUID, error) { return f.inRoom, nil }
 func (f *fakeParts) MarkRoomEmpty(context.Context, uuid.UUID) error            { f.roomEmpty = true; return nil }
@@ -57,7 +62,7 @@ func (f *fakeParts) CountInRoom(context.Context) (int64, error)                {
 type fakeLK struct {
 	mu        sync.Mutex
 	connected []string
-	listErr   error
+	gone      bool
 	deleteErr error
 	removed   []string
 }
@@ -69,8 +74,8 @@ func (f *fakeLK) RemoveParticipant(_ context.Context, _, identity string) error 
 	f.removed = append(f.removed, identity)
 	return nil
 }
-func (f *fakeLK) ListIdentities(context.Context, string) ([]string, error) {
-	return f.connected, f.listErr
+func (f *fakeLK) ListIdentities(context.Context, string) ([]string, bool, error) {
+	return f.connected, !f.gone, nil
 }
 
 func gauges() Gauges {
@@ -84,10 +89,13 @@ func TestSweepEvictsUnadmittedAndClearsGhosts(t *testing.T) {
 	room, admitted, intruder, ghost := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	m := &fakeMeetings{sweep: []uuid.UUID{room}}
 	p := &fakeParts{admitted: []uuid.UUID{admitted, ghost}, inRoom: []uuid.UUID{admitted, ghost}}
-	lk := &fakeLK{connected: []string{admitted.String(), intruder.String()}}
+	lk := &fakeLK{connected: []string{admitted.String(), intruder.String(), "egress-bot"}}
 	NewWorker(m, p, lk, gauges(), time.Hour).Tick(context.Background())
 
-	if !slices.Equal(lk.removed, []string{intruder.String()}) {
+	slices.Sort(lk.removed)
+	want := []string{intruder.String(), "egress-bot"}
+	slices.Sort(want)
+	if !slices.Equal(lk.removed, want) {
 		t.Fatalf("removed = %v, want only the intruder", lk.removed)
 	}
 	if !slices.Equal(p.notInRoom, []uuid.UUID{ghost}) {
@@ -99,7 +107,7 @@ func TestSweepHandlesVanishedRoom(t *testing.T) {
 	room := uuid.New()
 	m := &fakeMeetings{sweep: []uuid.UUID{room}}
 	p := &fakeParts{}
-	NewWorker(m, p, &fakeLK{listErr: realtime.ErrNotFound}, gauges(), time.Hour).Tick(context.Background())
+	NewWorker(m, p, &fakeLK{gone: true}, gauges(), time.Hour).Tick(context.Background())
 	if !p.roomEmpty || !slices.Equal(m.roomCleared, []uuid.UUID{room}) {
 		t.Fatal("a vanished room must clear presence and room_created_at")
 	}

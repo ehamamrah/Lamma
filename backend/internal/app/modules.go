@@ -39,6 +39,7 @@ type container struct {
 	partStore  *participant.PGStore
 	meetings   *meeting.Service
 	parts      *participant.Service
+	seats      *participant.Seats
 	chat       *chat.Service
 	moderation *moderation.Service
 }
@@ -66,42 +67,41 @@ func newContainer(d deps) *container {
 
 func (c *container) buildServices() {
 	hasher := password.NewHasher(c.cfg.Argon2MaxConcurrent)
+	// The participant service needs meeting lookups and the meeting service
+	// needs the participant service as its HostRegistrar: wire via a late-bound lookup.
+	lookup := &lateLookup{}
 	c.parts = participant.NewService(participant.Deps{
-		Store: c.partStore, Meetings: c.meetStore, Rooms: c.lk,
-		Signer:    realtime.NewSigner(c.cfg.LiveKit.APIKey, c.cfg.LiveKit.APISecret, c.cfg.LiveKit.TokenTTL),
-		Notifier:  notifier{hub: c.hub, lk: c.lk},
-		Passwords: hasher, Tx: c.tx, LeaseTTL: c.cfg.LiveKit.TokenTTL,
-		PasswordLimit: participant.RateCheck(c.limiter.For(c.policies().password)),
+		Store: c.partStore, Meetings: lookup, Notifier: notifier{hub: c.hub, lk: c.lk},
+		Passwords: hasher, Tx: c.tx, PasswordLimit: participant.RateCheck(c.limiter.For(c.policies().password)),
 	})
 	c.meetings = meeting.NewService(c.meetStore, c.parts, c.tx, hasher, meeting.Config{
 		DefaultTTL: c.cfg.Meeting.DefaultTTL, MaxTTL: c.cfg.Meeting.MaxTTL, MaxParticipants: c.cfg.Meeting.MaxParticipants,
 	})
+	lookup.svc = c.meetings
+	c.seats = participant.NewSeats(participant.SeatDeps{
+		Store: c.partStore, Meetings: c.meetings, Rooms: c.lk, Tx: c.tx, LeaseTTL: c.cfg.LiveKit.TokenTTL,
+		Signer: realtime.NewSigner(c.cfg.LiveKit.APIKey, c.cfg.LiveKit.APISecret, c.cfg.LiveKit.TokenTTL),
+	})
 	c.chat = chat.NewService(c.lk, chat.NewRedisBuffer(c.infra.redis), chat.RateCheck(c.limiter.For(c.policies().chatMeeting)))
-	c.moderation = moderation.NewService(c.parts, moderationMeetings{c.meetings, c.meetStore}, c.lk, c.chat, c.cfg.LiveKit.CallTimeout)
+	c.moderation = moderation.NewService(c.parts, c.meetings, c.lk, c.chat, c.cfg.LiveKit.CallTimeout)
+}
+
+// lateLookup breaks the construction cycle between the two services.
+type lateLookup struct{ svc *meeting.Service }
+
+func (l *lateLookup) Lookup(ctx context.Context, code string) (meeting.Meeting, error) {
+	return l.svc.Lookup(ctx, code)
 }
 
 func (c *container) workers() []Worker {
-	mw := maintenance.NewWorker(c.meetStore, maintenanceParticipants{c.partStore}, c.lk, maintenance.Gauges{
+	mw := maintenance.NewWorker(c.meetStore, c.partStore, c.lk, maintenance.Gauges{
 		MeetingsActive: c.infra.metrics.MeetingsActive, ParticipantsInRoom: c.infra.metrics.ParticipantsInRoom,
 	}, c.cfg.Meeting.Retention)
 	return []Worker{c.hub.Run, mw.Run}
 }
 
-// moderationMeetings combines the meeting service with room bookkeeping.
-type moderationMeetings struct {
-	*meeting.Service
-	store *meeting.PGStore
-}
-
-func (m moderationMeetings) MarkRoomClosed(ctx context.Context, id uuid.UUID) error {
-	return m.store.MarkRoomClosed(ctx, id)
-}
-
-// maintenanceParticipants adapts the participant store for the worker.
-type maintenanceParticipants struct{ *participant.PGStore }
-
 // notifier delivers waiting-room events: decisions via the Redis hub, and a
-// "someone is waiting" signal to the room via LiveKit (hosts react to it).
+// "someone is waiting" signal to the host only, via LiveKit.
 type notifier struct {
 	hub *admission.Hub
 	lk  *realtime.Client
@@ -111,8 +111,8 @@ func (n notifier) Decided(ctx context.Context, id uuid.UUID, s access.Status) {
 	n.hub.Decided(ctx, id, s)
 }
 
-func (n notifier) Waiting(ctx context.Context, meetingID uuid.UUID) {
-	err := n.lk.SendData(ctx, meetingID.String(), "lamma.waiting", []byte(`{"type":"waiting"}`))
+func (n notifier) Waiting(ctx context.Context, meetingID, hostID uuid.UUID) {
+	err := n.lk.SendData(ctx, meetingID.String(), "lamma.waiting", []byte(`{"type":"waiting"}`), hostID.String())
 	if err != nil {
 		slog.DebugContext(ctx, "waiting notification not delivered", slog.Any("error", err))
 	}

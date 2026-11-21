@@ -87,23 +87,30 @@ func (c *Client) RemoveParticipant(ctx context.Context, room, identity string) e
 	return ignoreNotFound(err)
 }
 
-// ListIdentities returns the identities connected to room (ErrNotFound if
-// the room does not exist).
-func (c *Client) ListIdentities(ctx context.Context, room string) ([]string, error) {
-	var ids []string
-	err := c.retry(ctx, c.admin, "list_participants", func(ctx context.Context) error {
-		ctx, err := c.api.roomAdmin(ctx, room)
-		if err != nil {
-			return err
-		}
-		res, err := c.api.svc.ListParticipants(ctx, &livekit.ListParticipantsRequest{Room: room})
-		if err != nil {
-			return err
-		}
-		ids = identities(res.GetParticipants())
-		return nil
+// ListIdentities returns the identities connected to room; exists is false
+// when the room no longer exists in LiveKit.
+func (c *Client) ListIdentities(ctx context.Context, room string) (ids []string, exists bool, err error) {
+	err = c.retry(ctx, c.admin, "list_participants", func(ctx context.Context) error {
+		var err error
+		ids, err = c.listOnce(ctx, room)
+		return err
 	})
-	return ids, err
+	if errors.Is(err, ErrNotFound) {
+		return nil, false, nil
+	}
+	return ids, err == nil, err
+}
+
+func (c *Client) listOnce(ctx context.Context, room string) ([]string, error) {
+	ctx, err := c.api.roomAdmin(ctx, room)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.api.svc.ListParticipants(ctx, &livekit.ListParticipantsRequest{Room: room})
+	if err != nil {
+		return nil, err
+	}
+	return identities(res.GetParticipants()), nil
 }
 
 func identities(ps []*livekit.ParticipantInfo) []string {

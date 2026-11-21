@@ -122,3 +122,30 @@ Phase 2: SP-U1 (verify LiveKit TURN cannot relay to internal addresses).
 | SP-12 | Low | Raw IPs in Redis keys | Keys are HMAC'd |
 | Handoffs | — | Recover after headers; detached readiness probes; cancel ≠ Redis error | All fixed |
 | SP-13 | Info | SSE write deadline / shutdown hook | Implemented in Phase 4 (admission hub) |
+
+## Phase 4 — Business logic
+
+- backend-architect: **APPROVE WITH CHANGES** (no Critical/High).
+- security-performance-reviewer: **FAIL** (1 High) → fixed, re-verification requested.
+
+| # | Sev | Finding | Resolution |
+| --- | --- | --- | --- |
+| SP4-1 | **High** | Lease counter never reset → permanent media lockout (host too); LiveKit outage consumed attempts | Sliding 10-min lease window in SQL; host exempt; room ensured *before* the seat claim; e2e regression test |
+| SP4-2 | Med | "Someone is waiting" broadcast to the whole room | Sent to the host identity only, 1s budget |
+| SP4-3 | Med | Unbounded admitted rows; sweep loaded all admitted IDs | Admitted guests capped at 4× capacity; sweep filters only connected identities (`= ANY`) |
+| SP4-4 | Med | Meeting-wide join limit = lockout vector | Keyed per IP per meeting (5/min), session holders exempt |
+| SP4-5 | Low | SSE headers not flushed | Flushed on open |
+| SP4-6 | Low | Token TTL unbounded | Validated 30s–5m |
+| SP4-7 | Low | Host list polling shared the moderation budget | GET excluded from the moderation limit |
+| SP4-8 | Low | `MarkJoined` not scoped to room | Scoped by `meeting_id`; foreign rooms/identities evicted |
+| SP4-9 | Low | ~6 queries per token request | **Accepted** for MVP (indexed, single meeting row lock) |
+| SP4-10 | Info | Removed guests can rejoin with a new session | **Accepted** (A3); lock / waiting room are the controls |
+| BA4-1 | Med | Modules bypassed meeting service via its store | Room bookkeeping on `meeting.Service`; store `Lookup` and glue adapter removed |
+| BA4-2 | Med | Exported embedded `Deps` | Unexported `d Deps` |
+| BA4-3 | Med | Participant service nearing god object | `Seats` split out with its own narrow `SeatStore` |
+| BA4-4 | Med | Maintenance imported adapter / domain type in infra file | `ListIdentities` returns `exists`; `Intruder` moved to domain file |
+| BA4-5 | Med | No index for `in_room` queries | `participants_in_room` partial index |
+| BA4-6 | Med | Remove: read-then-write race | Single guarded `RemoveGuest` statement returning previous status |
+| BA4-7/8 | Low | Transport imported adapter; mute audited before success | Source whitelist in moderation; mute then audit |
+| BA4-9/10 | Low | Silent occupancy error; two-statement leave | Debug log; leave in one transaction |
+| BA4-12 | Info | `admission.wait` ~20 lines | **Accepted exception**: single `select` loop; splitting harms clarity |

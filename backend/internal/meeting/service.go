@@ -16,8 +16,19 @@ import (
 type Store interface {
 	Insert(ctx context.Context, m Meeting) error // ErrCodeTaken on collision
 	GetOpenByCode(ctx context.Context, code string) (Meeting, error)
+	GetOpenByID(ctx context.Context, id uuid.UUID) (Meeting, error)
 	UpdateSettings(ctx context.Context, id, actor uuid.UUID, s Settings) (Meeting, error)
 	End(ctx context.Context, id uuid.UUID, actor *uuid.UUID) (bool, error)
+	RoomStore
+}
+
+// RoomStore records the LiveKit room lifecycle for a meeting.
+type RoomStore interface {
+	IsOpen(ctx context.Context, id uuid.UUID) (bool, error)
+	MarkRoomCreated(ctx context.Context, id uuid.UUID) error
+	ClearRoomCreated(ctx context.Context, id uuid.UUID) error
+	MarkRoomClosed(ctx context.Context, id uuid.UUID) error
+	ReopenRoomForClosing(ctx context.Context, id uuid.UUID) error
 }
 
 // Host is the creator's session, registered by the participant module.

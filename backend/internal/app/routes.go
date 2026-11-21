@@ -47,13 +47,14 @@ func bySession(r *http.Request) string {
 	return ratelimit.ByIP(r)
 }
 
-// sessionlessMeeting keys on the meeting code for callers without a session,
-// so session holders resuming are never blocked by others' joins.
-func sessionlessMeeting(r *http.Request) string {
+// sessionlessMeetingIP keys on meeting+IP for callers without a session, so
+// neither a few abusive IPs nor others' joins can block a meeting's guests,
+// and session holders resuming are never limited (review SP4-4).
+func sessionlessMeetingIP(r *http.Request) string {
 	if _, ok := access.FromContext(r.Context()); ok {
 		return ""
 	}
-	return chi.URLParam(r, "code")
+	return chi.URLParam(r, "code") + "|" + ratelimit.ByIP(r)
 }
 
 func (c *container) routes() routes {
@@ -62,9 +63,9 @@ func (c *container) routes() routes {
 		Cookies: c.cookies, PublicBaseURL: c.cfg.PublicBaseURL, OriginHashKey: c.cfg.OriginHashKey,
 		CreateLimit: c.limit(pol.create, ratelimit.ByIP), LookupLimit: c.limit(pol.lookup, ratelimit.ByIP),
 	})
-	partH := participant.NewHandler(c.parts, participant.HandlerConfig{
+	partH := participant.NewHandler(c.parts, c.seats, participant.HandlerConfig{
 		Cookies: c.cookies, OriginHashKey: c.cfg.OriginHashKey, LiveKitURL: c.cfg.LiveKit.PublicURL,
-		JoinIPLimit: c.limit(pol.joinIP, ratelimit.ByIP), JoinMtgLimit: c.limit(pol.joinMeeting, sessionlessMeeting),
+		JoinIPLimit: c.limit(pol.joinIP, ratelimit.ByIP), JoinMtgLimit: c.limit(pol.joinMeeting, sessionlessMeetingIP),
 		TokenLimit: c.limit(pol.token, bySession),
 	})
 	return routes{
@@ -82,6 +83,6 @@ func (c *container) routes() routes {
 
 func (c *container) internalRoutes(r chi.Router) {
 	lk := c.cfg.LiveKit
-	presence := participant.NewPresence(c.partStore, c.meetStore)
-	r.Post("/livekit/webhook", realtime.NewWebhookHandler(lk.APIKey, lk.APISecret, presence, c.meetStore, c.lk).ServeHTTP)
+	presence := participant.NewPresence(c.partStore, c.meetings)
+	r.Post("/livekit/webhook", realtime.NewWebhookHandler(lk.APIKey, lk.APISecret, presence, c.meetings, c.lk).ServeHTTP)
 }

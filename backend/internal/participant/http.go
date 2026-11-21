@@ -21,18 +21,21 @@ type HandlerConfig struct {
 	OriginHashKey []byte
 	LiveKitURL    string
 	JoinIPLimit   Middleware // per client IP
-	JoinMtgLimit  Middleware // per meeting, sessionless callers only
+	JoinMtgLimit  Middleware // per IP per meeting, sessionless callers only
 	TokenLimit    Middleware // per session
 }
 
 // Handler exposes join, me, token and leave under /meetings/{code}.
 type Handler struct {
-	svc *Service
-	cfg HandlerConfig
+	svc   *Service
+	seats *Seats
+	cfg   HandlerConfig
 }
 
 // NewHandler creates the participant HTTP handler.
-func NewHandler(svc *Service, cfg HandlerConfig) *Handler { return &Handler{svc: svc, cfg: cfg} }
+func NewHandler(svc *Service, seats *Seats, cfg HandlerConfig) *Handler {
+	return &Handler{svc: svc, seats: seats, cfg: cfg}
+}
 
 // Routes registers the participant endpoints on the {code} subrouter.
 func (h *Handler) Routes(r chi.Router) {
@@ -111,7 +114,7 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 	pr, _ := access.FromContext(r.Context())
-	grant, err := h.svc.IssueToken(r.Context(), pr)
+	grant, err := h.seats.IssueToken(r.Context(), pr)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return

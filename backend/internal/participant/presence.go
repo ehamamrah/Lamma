@@ -11,8 +11,8 @@ import (
 
 // PresenceStore is the persistence port for webhook-driven presence.
 type PresenceStore interface {
-	MarkJoined(ctx context.Context, id uuid.UUID, sid string, at time.Time) (meetingID uuid.UUID, status access.Status, applied bool, err error)
-	Exists(ctx context.Context, id uuid.UUID) (bool, error)
+	MarkJoined(ctx context.Context, meetingID, id uuid.UUID, sid string, at time.Time) (status access.Status, applied bool, err error)
+	Exists(ctx context.Context, meetingID, id uuid.UUID) (bool, error)
 	MarkLeft(ctx context.Context, id uuid.UUID, sid string, at time.Time) error
 	MarkRoomEmpty(ctx context.Context, meetingID uuid.UUID) error
 }
@@ -35,15 +35,16 @@ func NewPresence(store PresenceStore, meetings MeetingState) *Presence {
 	return &Presence{store: store, meetings: meetings}
 }
 
-// Joined records a connection and reports whether it is authorized.
-// Unknown identities are unauthorized; stale (out-of-order) events are ignored.
-func (p *Presence) Joined(ctx context.Context, identity uuid.UUID, sid string, at time.Time) (authorized bool, err error) {
-	meetingID, status, applied, err := p.store.MarkJoined(ctx, identity, sid, at)
+// Joined records a connection to meetingID's room and reports whether it is
+// authorized. Identities unknown in that meeting are unauthorized; stale
+// (out-of-order) events are ignored.
+func (p *Presence) Joined(ctx context.Context, meetingID, identity uuid.UUID, sid string, at time.Time) (authorized bool, err error) {
+	status, applied, err := p.store.MarkJoined(ctx, meetingID, identity, sid, at)
 	if err != nil {
 		return false, err
 	}
 	if !applied {
-		exists, err := p.store.Exists(ctx, identity)
+		exists, err := p.store.Exists(ctx, meetingID, identity)
 		return exists, err // exists ⇒ stale event, nothing to do
 	}
 	if status != access.StatusAdmitted {

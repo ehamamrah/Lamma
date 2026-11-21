@@ -141,7 +141,7 @@ func loadLimits(r *reader) Limits {
 		Create:      r.rate("RATE_LIMIT_CREATE", "10/h"),
 		Lookup:      r.rate("RATE_LIMIT_LOOKUP", "30/m"),
 		JoinIP:      r.rate("RATE_LIMIT_JOIN_IP", "10/m"),
-		JoinMeeting: r.rate("RATE_LIMIT_JOIN_MEETING", "60/m"),
+		JoinMeeting: r.rate("RATE_LIMIT_JOIN_MEETING", "5/m"),
 		Password:    r.rate("RATE_LIMIT_PASSWORD", "5/15m"),
 		Token:       r.rate("RATE_LIMIT_TOKEN", "6/m"),
 		Chat:        r.rate("RATE_LIMIT_CHAT", "20/10s"),

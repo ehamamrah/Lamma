@@ -16,7 +16,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ehamamrah/lamma/backend/internal/participant"
-	"github.com/ehamamrah/lamma/backend/internal/realtime"
 )
 
 // Meetings is the meeting-side maintenance store.
@@ -34,7 +33,7 @@ type Meetings interface {
 type Participants interface {
 	ClaimIntruders(ctx context.Context) ([]participant.Intruder, error)
 	MarkNotInRoom(ctx context.Context, id uuid.UUID) error
-	AdmittedIDs(ctx context.Context, meetingID uuid.UUID) ([]uuid.UUID, error)
+	FilterAdmitted(ctx context.Context, meetingID uuid.UUID, candidates []uuid.UUID) ([]uuid.UUID, error)
 	InRoomIDs(ctx context.Context, meetingID uuid.UUID) ([]uuid.UUID, error)
 	MarkRoomEmpty(ctx context.Context, meetingID uuid.UUID) error
 	CountInRoom(ctx context.Context) (int64, error)
@@ -44,7 +43,8 @@ type Participants interface {
 type LiveKit interface {
 	DeleteRoom(ctx context.Context, room string) error
 	RemoveParticipant(ctx context.Context, room, identity string) error
-	ListIdentities(ctx context.Context, room string) ([]string, error)
+	// ListIdentities returns connected identities; exists=false if the room is gone.
+	ListIdentities(ctx context.Context, room string) (ids []string, exists bool, err error)
 }
 
 // Gauges are refreshed every tick.
@@ -174,6 +174,3 @@ func fanOut[T any](ctx context.Context, items []T, fn func(context.Context, T) e
 	_ = g.Wait()
 	return errors.Join(errs...)
 }
-
-// isRoomGone reports a missing LiveKit room.
-func isRoomGone(err error) bool { return errors.Is(err, realtime.ErrNotFound) }

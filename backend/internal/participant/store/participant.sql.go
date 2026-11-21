@@ -63,8 +63,12 @@ func (q *Queries) ClaimIntruders(ctx context.Context) ([]ClaimIntrudersRow, erro
 
 const claimLease = `-- name: ClaimLease :one
 UPDATE participants
-SET lease_until = now() + $2::interval,
-    lease_count = CASE WHEN in_room THEN lease_count ELSE lease_count + 1 END
+SET lease_count = CASE
+      WHEN in_room THEN 0
+      WHEN lease_until IS NULL OR lease_until < now() - interval '10 minutes' THEN 1
+      ELSE lease_count + 1
+    END,
+    lease_until = now() + $2::interval
 WHERE id = $1 AND status = 'admitted'
 RETURNING lease_count, in_room
 `
@@ -79,11 +83,25 @@ type ClaimLeaseRow struct {
 	InRoom     bool
 }
 
+// lease_count counts leases taken without connecting inside a sliding window:
+// it restarts once the previous lease is long expired, so it can never lock a
+// participant out for the meeting's lifetime (review SP4-1).
 func (q *Queries) ClaimLease(ctx context.Context, arg ClaimLeaseParams) (ClaimLeaseRow, error) {
 	row := q.db.QueryRow(ctx, claimLease, arg.ID, arg.Ttl)
 	var i ClaimLeaseRow
 	err := row.Scan(&i.LeaseCount, &i.InRoom)
 	return i, err
+}
+
+const countAdmittedGuests = `-- name: CountAdmittedGuests :one
+SELECT count(*) FROM participants WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted'
+`
+
+func (q *Queries) CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdmittedGuests, meetingID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countFreshWaiting = `-- name: CountFreshWaiting :one
@@ -175,6 +193,49 @@ func (q *Queries) DenyAllWaiting(ctx context.Context, meetingID uuid.UUID) ([]uu
 	return items, nil
 }
 
+const filterAdmitted = `-- name: FilterAdmitted :many
+SELECT id FROM participants
+WHERE meeting_id = $1 AND status = 'admitted' AND id = ANY ($2::uuid[])
+`
+
+type FilterAdmittedParams struct {
+	MeetingID  uuid.UUID
+	Candidates []uuid.UUID
+}
+
+// Of the identities LiveKit reports as connected, which are admitted? Bounded
+// by the room size, unlike listing every admitted row.
+func (q *Queries) FilterAdmitted(ctx context.Context, arg FilterAdmittedParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, filterAdmitted, arg.MeetingID, arg.Candidates)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getHostID = `-- name: GetHostID :one
+SELECT id FROM participants WHERE meeting_id = $1 AND role = 'host' LIMIT 1
+`
+
+func (q *Queries) GetHostID(ctx context.Context, meetingID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getHostID, meetingID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getParticipant = `-- name: GetParticipant :one
 SELECT id, meeting_id, display_name, role, status, status_at, in_room, in_room_at, livekit_sid, lease_until, lease_count, origin_hash, reconcile_after, session_hash, created_at FROM participants WHERE id = $1 AND meeting_id = $2
 `
@@ -186,33 +247,6 @@ type GetParticipantParams struct {
 
 func (q *Queries) GetParticipant(ctx context.Context, arg GetParticipantParams) (Participant, error) {
 	row := q.db.QueryRow(ctx, getParticipant, arg.ID, arg.MeetingID)
-	var i Participant
-	err := row.Scan(
-		&i.ID,
-		&i.MeetingID,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.StatusAt,
-		&i.InRoom,
-		&i.InRoomAt,
-		&i.LivekitSid,
-		&i.LeaseUntil,
-		&i.LeaseCount,
-		&i.OriginHash,
-		&i.ReconcileAfter,
-		&i.SessionHash,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getParticipantByID = `-- name: GetParticipantByID :one
-SELECT id, meeting_id, display_name, role, status, status_at, in_room, in_room_at, livekit_sid, lease_until, lease_count, origin_hash, reconcile_after, session_hash, created_at FROM participants WHERE id = $1
-`
-
-func (q *Queries) GetParticipantByID(ctx context.Context, id uuid.UUID) (Participant, error) {
-	row := q.db.QueryRow(ctx, getParticipantByID, id)
 	var i Participant
 	err := row.Scan(
 		&i.ID,
@@ -301,30 +335,6 @@ func (q *Queries) InsertParticipantEvent(ctx context.Context, arg InsertParticip
 		arg.TargetID,
 	)
 	return err
-}
-
-const listAdmittedIDs = `-- name: ListAdmittedIDs :many
-SELECT id FROM participants WHERE meeting_id = $1 AND status = 'admitted'
-`
-
-func (q *Queries) ListAdmittedIDs(ctx context.Context, meetingID uuid.UUID) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listAdmittedIDs, meetingID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []uuid.UUID{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listFreshWaiting = `-- name: ListFreshWaiting :many
@@ -426,27 +436,30 @@ func (q *Queries) LockMeeting(ctx context.Context, id uuid.UUID) (LockMeetingRow
 const markJoined = `-- name: MarkJoined :one
 UPDATE participants
 SET in_room = true, in_room_at = $2, livekit_sid = $3, lease_count = 0
-WHERE id = $1 AND (in_room_at IS NULL OR in_room_at <= $2)
-RETURNING meeting_id, status
+WHERE id = $1 AND meeting_id = $4
+  AND (in_room_at IS NULL OR in_room_at <= $2)
+RETURNING status
 `
 
 type MarkJoinedParams struct {
-	ID      uuid.UUID
-	EventAt *time.Time
-	Sid     *string
-}
-
-type MarkJoinedRow struct {
+	ID        uuid.UUID
+	EventAt   *time.Time
+	Sid       *string
 	MeetingID uuid.UUID
-	Status    ParticipantStatus
 }
 
-// Webhook participant_joined: always record presence (a fact), ordered by event time.
-func (q *Queries) MarkJoined(ctx context.Context, arg MarkJoinedParams) (MarkJoinedRow, error) {
-	row := q.db.QueryRow(ctx, markJoined, arg.ID, arg.EventAt, arg.Sid)
-	var i MarkJoinedRow
-	err := row.Scan(&i.MeetingID, &i.Status)
-	return i, err
+// Webhook participant_joined: always record presence (a fact), ordered by event
+// time, and only for the room the participant belongs to.
+func (q *Queries) MarkJoined(ctx context.Context, arg MarkJoinedParams) (ParticipantStatus, error) {
+	row := q.db.QueryRow(ctx, markJoined,
+		arg.ID,
+		arg.EventAt,
+		arg.Sid,
+		arg.MeetingID,
+	)
+	var status ParticipantStatus
+	err := row.Scan(&status)
+	return status, err
 }
 
 const markLeft = `-- name: MarkLeft :execrows
@@ -487,6 +500,22 @@ func (q *Queries) MarkRoomEmpty(ctx context.Context, meetingID uuid.UUID) error 
 	return err
 }
 
+const participantExists = `-- name: ParticipantExists :one
+SELECT EXISTS (SELECT 1 FROM participants WHERE id = $1 AND meeting_id = $2) AS found
+`
+
+type ParticipantExistsParams struct {
+	ID        uuid.UUID
+	MeetingID uuid.UUID
+}
+
+func (q *Queries) ParticipantExists(ctx context.Context, arg ParticipantExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, participantExists, arg.ID, arg.MeetingID)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
 const releaseLease = `-- name: ReleaseLease :exec
 UPDATE participants SET lease_until = now() WHERE id = $1
 `
@@ -494,6 +523,31 @@ UPDATE participants SET lease_until = now() WHERE id = $1
 func (q *Queries) ReleaseLease(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, releaseLease, id)
 	return err
+}
+
+const removeGuest = `-- name: RemoveGuest :one
+WITH prev AS (
+  SELECT t.id, t.status FROM participants t
+  WHERE t.id = $1 AND t.meeting_id = $2 AND t.role = 'guest'
+    AND t.status IN ('admitted', 'waiting', 'left')
+  FOR UPDATE
+)
+UPDATE participants SET status = 'removed', status_at = now()
+FROM prev WHERE participants.id = prev.id
+RETURNING prev.status AS previous_status
+`
+
+type RemoveGuestParams struct {
+	ID        uuid.UUID
+	MeetingID uuid.UUID
+}
+
+// Single statement: guarded on role and status, returns the previous status.
+func (q *Queries) RemoveGuest(ctx context.Context, arg RemoveGuestParams) (ParticipantStatus, error) {
+	row := q.db.QueryRow(ctx, removeGuest, arg.ID, arg.MeetingID)
+	var previous_status ParticipantStatus
+	err := row.Scan(&previous_status)
+	return previous_status, err
 }
 
 const setParticipantStatus = `-- name: SetParticipantStatus :one

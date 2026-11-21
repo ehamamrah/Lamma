@@ -100,7 +100,9 @@ func newStream(w http.ResponseWriter) *stream {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	return &stream{w: w, rc: http.NewResponseController(w)}
+	s := &stream{w: w, rc: http.NewResponseController(w)}
+	_ = s.rc.Flush() // deliver headers now, not at the first heartbeat
+	return s
 }
 
 func (s *stream) send(event, data string) bool {

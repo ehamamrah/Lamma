@@ -31,6 +31,12 @@ func (f *fakeStore) UpdateSettings(context.Context, uuid.UUID, uuid.UUID, Settin
 	return Meeting{}, nil
 }
 func (f *fakeStore) End(context.Context, uuid.UUID, *uuid.UUID) (bool, error) { return true, nil }
+func (f *fakeStore) GetOpenByID(context.Context, uuid.UUID) (Meeting, error)  { return Meeting{}, nil }
+func (f *fakeStore) IsOpen(context.Context, uuid.UUID) (bool, error)          { return true, nil }
+func (f *fakeStore) MarkRoomCreated(context.Context, uuid.UUID) error         { return nil }
+func (f *fakeStore) ClearRoomCreated(context.Context, uuid.UUID) error        { return nil }
+func (f *fakeStore) MarkRoomClosed(context.Context, uuid.UUID) error          { return nil }
+func (f *fakeStore) ReopenRoomForClosing(context.Context, uuid.UUID) error    { return nil }
 
 type fakeHosts struct{ calls int }
 

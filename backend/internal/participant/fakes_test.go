@@ -15,20 +15,27 @@ import (
 
 // memStore is an in-memory Store for service tests.
 type memStore struct {
-	mu      sync.Mutex
-	lock    MeetingLock
-	byID    map[uuid.UUID]*Participant
-	leases  map[uuid.UUID]int
-	seats   int64
-	pending int64
-	audits  []string
+	mu       sync.Mutex
+	lock     MeetingLock
+	byID     map[uuid.UUID]*Participant
+	leases   map[uuid.UUID]int
+	seats    int64
+	pending  int64
+	admitted int64
+	audits   []string
 }
 
 func newMemStore(lock MeetingLock) *memStore {
 	return &memStore{lock: lock, byID: map[uuid.UUID]*Participant{}, leases: map[uuid.UUID]int{}}
 }
 
-func (m *memStore) LockMeeting(context.Context, uuid.UUID) (MeetingLock, error) { return m.lock, nil }
+func (m *memStore) LockMeeting(context.Context, uuid.UUID) (MeetingLock, error) {
+	lock := m.lock
+	if lock.MaxParticipants == 0 {
+		lock.MaxParticipants = 2
+	}
+	return lock, nil
+}
 
 func (m *memStore) Insert(_ context.Context, n NewParticipant) (Participant, error) {
 	m.mu.Lock()
@@ -80,9 +87,27 @@ func (m *memStore) CountSeats(context.Context, uuid.UUID, uuid.UUID, []byte) (in
 	return m.seats, m.pending, nil
 }
 func (m *memStore) ClaimLease(_ context.Context, id uuid.UUID, _ time.Duration) (int, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.leases[id]++
 	return m.leases[id], false, nil
 }
+func (m *memStore) RemoveGuest(_ context.Context, _, _, target uuid.UUID) (access.Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.byID[target]
+	if !ok || p.Role != access.RoleGuest || p.Status == access.StatusRemoved || p.Status == access.StatusDenied {
+		return "", errNotFound
+	}
+	prev := p.Status
+	p.Status = access.StatusRemoved
+	m.audits = append(m.audits, "remove")
+	return prev, nil
+}
+func (m *memStore) CountAdmittedGuests(context.Context, uuid.UUID) (int64, error) {
+	return m.admitted, nil
+}
+func (m *memStore) HostID(context.Context, uuid.UUID) (uuid.UUID, error)  { return uuid.New(), nil }
 func (m *memStore) ReleaseLease(context.Context, uuid.UUID) error         { return nil }
 func (m *memStore) AnyoneInRoom(context.Context, uuid.UUID) (bool, error) { return false, nil }
 func (m *memStore) Audit(_ context.Context, _, _ uuid.UUID, a string, _ uuid.UUID) error {
@@ -133,7 +158,7 @@ func (f *fakeNotifier) Decided(_ context.Context, id uuid.UUID, s access.Status)
 	}
 	f.decided[id] = s
 }
-func (f *fakeNotifier) Waiting(context.Context, uuid.UUID) { f.waiting++ }
+func (f *fakeNotifier) Waiting(context.Context, uuid.UUID, uuid.UUID) { f.waiting++ }
 
 type fakePasswords struct{ calls int }
 

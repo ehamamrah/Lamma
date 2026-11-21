@@ -12,7 +12,6 @@ import (
 	"github.com/ehamamrah/lamma/backend/internal/participant"
 	"github.com/ehamamrah/lamma/backend/internal/platform/apperr"
 	"github.com/ehamamrah/lamma/backend/internal/platform/httpx"
-	"github.com/ehamamrah/lamma/backend/internal/realtime"
 )
 
 // Handler exposes host-only endpoints on the {code} subrouter.
@@ -29,9 +28,9 @@ func NewHandler(svc *Service, limit func(http.Handler) http.Handler) *Handler {
 // Routes registers the moderation endpoints. Every route requires a host
 // session (middleware) and the service re-checks the policy.
 func (h *Handler) Routes(r chi.Router) {
+	r.With(access.Require(access.ActionModerate)).Get("/participants", h.listWaiting)
 	r.Group(func(r chi.Router) {
 		r.Use(access.Require(access.ActionModerate), h.limit)
-		r.Get("/participants", h.listWaiting)
 		r.Post("/participants/deny-waiting", h.denyWaiting)
 		r.Post("/participants/{id}/admit", h.target(h.svc.Admit))
 		r.Post("/participants/{id}/deny", h.target(h.svc.Deny))
@@ -108,6 +107,9 @@ type muteRequest struct {
 	Source string `json:"source"`
 }
 
+// validSources are the track sources a host may mute.
+var validSources = map[string]bool{"microphone": true, "camera": true, "screen_share": true}
+
 var errBadSource = apperr.New(apperr.KindInvalid, "invalid_source", "Source must be microphone, camera or screen_share.")
 
 func (h *Handler) mute(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +118,7 @@ func (h *Handler) mute(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = httpx.Decode(w, r, &req)
 	}
-	if err == nil && !realtime.ValidSource(req.Source) {
+	if err == nil && !validSources[req.Source] {
 		err = errBadSource
 	}
 	if err == nil {

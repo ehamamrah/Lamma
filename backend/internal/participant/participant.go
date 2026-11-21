@@ -32,8 +32,17 @@ func (p Participant) FreshWaiting(now time.Time) bool {
 	return p.Status == access.StatusWaiting && now.Sub(p.StatusAt) < waitingTTL
 }
 
+// Intruder is a connected participant who is no longer admitted.
+type Intruder struct {
+	ID        uuid.UUID
+	MeetingID uuid.UUID
+}
+
 // Limits on abuse of the waiting room and seats (PLAN.md §6, §9).
 const (
+	// admittedFactor caps admitted guest rows per meeting at a multiple of
+	// its capacity, bounding row growth from scripted joins.
+	admittedFactor             = 4
 	maxWaitingPerOrigin        = 3
 	maxWaitingPerMeeting       = 50
 	maxUnconnectedPerOrigin    = 3

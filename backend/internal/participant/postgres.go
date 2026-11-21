@@ -83,6 +83,34 @@ func (s *PGStore) Audit(ctx context.Context, meetingID, actor uuid.UUID, action 
 	return s.audit(ctx, meetingID, &actor, action, &target)
 }
 
+// RemoveGuest sets a guest to removed and audits it, returning the previous
+// status; errNotFound if no removable guest matched.
+func (s *PGStore) RemoveGuest(ctx context.Context, meetingID, actor, target uuid.UUID) (access.Status, error) {
+	var prev access.Status
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		status, err := s.q(ctx).RemoveGuest(ctx, store.RemoveGuestParams{ID: target, MeetingID: meetingID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("remove guest: %w", err)
+		}
+		prev = access.Status(status)
+		return s.audit(ctx, meetingID, &actor, "remove", &target)
+	})
+	return prev, err
+}
+
+// HostID returns the meeting's host participant.
+func (s *PGStore) HostID(ctx context.Context, meetingID uuid.UUID) (uuid.UUID, error) {
+	return s.q(ctx).GetHostID(ctx, meetingID)
+}
+
+// CountAdmittedGuests counts admitted guest rows of a meeting.
+func (s *PGStore) CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error) {
+	return s.q(ctx).CountAdmittedGuests(ctx, meetingID)
+}
+
 // CountWaiting counts fresh waiting entries for an origin and in total.
 func (s *PGStore) CountWaiting(ctx context.Context, meetingID uuid.UUID, origin []byte) (int64, int64, error) {
 	row, err := s.q(ctx).CountFreshWaiting(ctx, store.CountFreshWaitingParams{MeetingID: meetingID, OriginHash: origin})

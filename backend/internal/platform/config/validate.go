@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const minSecretLen = 32
@@ -29,6 +30,9 @@ func validateCommon(c Config) []error {
 	}
 	if c.Meeting.MaxParticipants < 2 || c.Meeting.MaxParticipants > 500 {
 		errs = append(errs, fmt.Errorf("MEETING_MAX_PARTICIPANTS: must be 2..500"))
+	}
+	if c.LiveKit.TokenTTL < 30*time.Second || c.LiveKit.TokenTTL > 5*time.Minute {
+		errs = append(errs, fmt.Errorf("LIVEKIT_TOKEN_TTL: must be between 30s and 5m"))
 	}
 	if c.Argon2MaxConcurrent < 1 || c.DBMaxConns < 2 {
 		errs = append(errs, fmt.Errorf("ARGON2_MAX_CONCURRENT >= 1 and DB_MAX_CONNS >= 2 required"))

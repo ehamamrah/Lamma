@@ -17,15 +17,15 @@ func (w *Worker) sweep(ctx context.Context) error {
 }
 
 func (w *Worker) sweepRoom(ctx context.Context, meetingID uuid.UUID) error {
-	connected, err := w.lk.ListIdentities(ctx, meetingID.String())
-	if isRoomGone(err) {
+	connected, exists, err := w.lk.ListIdentities(ctx, meetingID.String())
+	if err != nil {
+		return err
+	}
+	if !exists {
 		if err := w.parts.MarkRoomEmpty(ctx, meetingID); err != nil {
 			return err
 		}
 		return w.meetings.ClearRoomCreated(ctx, meetingID)
-	}
-	if err != nil {
-		return err
 	}
 	if err := w.evictUnadmitted(ctx, meetingID, connected); err != nil {
 		return err
@@ -33,9 +33,11 @@ func (w *Worker) sweepRoom(ctx context.Context, meetingID uuid.UUID) error {
 	return w.clearGhosts(ctx, meetingID, connected)
 }
 
-// evictUnadmitted removes connected identities that are not admitted.
+// evictUnadmitted removes connected identities that are not admitted
+// participants of this meeting (including identities that are not ours).
 func (w *Worker) evictUnadmitted(ctx context.Context, meetingID uuid.UUID, connected []string) error {
-	admitted, err := w.parts.AdmittedIDs(ctx, meetingID)
+	candidates := parseIDs(connected)
+	admitted, err := w.parts.FilterAdmitted(ctx, meetingID, candidates)
 	if err != nil {
 		return err
 	}
@@ -71,6 +73,16 @@ func (w *Worker) clearGhosts(ctx context.Context, meetingID uuid.UUID, connected
 		}
 	}
 	return nil
+}
+
+func parseIDs(identities []string) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(identities))
+	for _, s := range identities {
+		if id, err := uuid.Parse(s); err == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func toSet(ids []uuid.UUID) map[string]struct{} {

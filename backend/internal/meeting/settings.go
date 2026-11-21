@@ -32,3 +32,33 @@ func (s *Service) End(ctx context.Context, meetingID, actor uuid.UUID) (bool, er
 }
 
 func errNotFound() error { return apperr.ErrNotFound }
+
+// GetOpenByID returns an active, unexpired meeting.
+func (s *Service) GetOpenByID(ctx context.Context, id uuid.UUID) (Meeting, error) {
+	return s.store.GetOpenByID(ctx, id)
+}
+
+// IsOpen reports whether the meeting is active and unexpired.
+func (s *Service) IsOpen(ctx context.Context, id uuid.UUID) (bool, error) {
+	return s.store.IsOpen(ctx, id)
+}
+
+// MarkRoomCreated records that the LiveKit room exists.
+func (s *Service) MarkRoomCreated(ctx context.Context, id uuid.UUID) error {
+	return s.store.MarkRoomCreated(ctx, id)
+}
+
+// ClearRoomCreated records that the LiveKit room is gone.
+func (s *Service) ClearRoomCreated(ctx context.Context, id uuid.UUID) error {
+	return s.store.ClearRoomCreated(ctx, id)
+}
+
+// MarkRoomClosed records a confirmed room deletion after the meeting ended.
+func (s *Service) MarkRoomClosed(ctx context.Context, id uuid.UUID) error {
+	return s.store.MarkRoomClosed(ctx, id)
+}
+
+// ReopenRoomForClosing schedules an ended meeting's room for deletion again.
+func (s *Service) ReopenRoomForClosing(ctx context.Context, id uuid.UUID) error {
+	return s.store.ReopenRoomForClosing(ctx, id)
+}

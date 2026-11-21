@@ -14,24 +14,20 @@ import (
 
 // MarkJoined records presence; applied=false when no row matched (unknown
 // identity or an out-of-order event).
-func (s *PGStore) MarkJoined(ctx context.Context, id uuid.UUID, sid string, at time.Time) (uuid.UUID, access.Status, bool, error) {
-	row, err := s.q(ctx).MarkJoined(ctx, store.MarkJoinedParams{ID: id, Sid: &sid, EventAt: &at})
+func (s *PGStore) MarkJoined(ctx context.Context, meetingID, id uuid.UUID, sid string, at time.Time) (access.Status, bool, error) {
+	status, err := s.q(ctx).MarkJoined(ctx, store.MarkJoinedParams{ID: id, MeetingID: meetingID, Sid: &sid, EventAt: &at})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, "", false, nil
+		return "", false, nil
 	}
 	if err != nil {
-		return uuid.Nil, "", false, err
+		return "", false, err
 	}
-	return row.MeetingID, access.Status(row.Status), true, nil
+	return access.Status(status), true, nil
 }
 
-// Exists reports whether a participant with id exists.
-func (s *PGStore) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
-	_, err := s.q(ctx).GetParticipantByID(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
+// Exists reports whether participant id belongs to meetingID.
+func (s *PGStore) Exists(ctx context.Context, meetingID, id uuid.UUID) (bool, error) {
+	return s.q(ctx).ParticipantExists(ctx, store.ParticipantExistsParams{ID: id, MeetingID: meetingID})
 }
 
 // MarkLeft clears presence for the matching LiveKit session.
@@ -43,12 +39,6 @@ func (s *PGStore) MarkLeft(ctx context.Context, id uuid.UUID, sid string, at tim
 // MarkRoomEmpty clears presence for everyone in the meeting.
 func (s *PGStore) MarkRoomEmpty(ctx context.Context, meetingID uuid.UUID) error {
 	return s.q(ctx).MarkRoomEmpty(ctx, meetingID)
-}
-
-// Intruder is a connected participant who is no longer admitted.
-type Intruder struct {
-	ID        uuid.UUID
-	MeetingID uuid.UUID
 }
 
 // ClaimIntruders claims connected-but-not-admitted participants (SKIP LOCKED).
@@ -66,9 +56,9 @@ func (s *PGStore) MarkNotInRoom(ctx context.Context, id uuid.UUID) error {
 	return s.q(ctx).MarkNotInRoom(ctx, id)
 }
 
-// AdmittedIDs lists admitted participant IDs of a meeting.
-func (s *PGStore) AdmittedIDs(ctx context.Context, meetingID uuid.UUID) ([]uuid.UUID, error) {
-	return s.q(ctx).ListAdmittedIDs(ctx, meetingID)
+// FilterAdmitted returns the admitted subset of candidates.
+func (s *PGStore) FilterAdmitted(ctx context.Context, meetingID uuid.UUID, candidates []uuid.UUID) ([]uuid.UUID, error) {
+	return s.q(ctx).FilterAdmitted(ctx, store.FilterAdmittedParams{MeetingID: meetingID, Candidates: candidates})
 }
 
 // InRoomIDs lists participants the DB believes are connected.

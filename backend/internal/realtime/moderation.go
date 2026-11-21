@@ -13,9 +13,6 @@ var sources = map[string]livekit.TrackSource{
 	"screen_share": livekit.TrackSource_SCREEN_SHARE,
 }
 
-// ValidSource reports whether name is a mutable track source.
-func ValidSource(name string) bool { _, ok := sources[name]; return ok }
-
 // MuteSource server-mutes every published track of the given source. Lookup
 // and mute are retried together as one idempotent unit. Hosts can never
 // unmute others (privacy, PLAN.md A6).

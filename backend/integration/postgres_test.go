@@ -49,23 +49,29 @@ func (signer) Sign(g participant.Grant) (string, time.Time, error) { return "t",
 type notifier struct{}
 
 func (notifier) Decided(context.Context, uuid.UUID, access.Status) {}
-func (notifier) Waiting(context.Context, uuid.UUID)                {}
+func (notifier) Waiting(context.Context, uuid.UUID, uuid.UUID)     {}
 
 type env struct {
 	tx       *postgres.TxManager
 	meetings *meeting.PGStore
+	svc      *meeting.Service
 	parts    *participant.Service
+	seats    *participant.Seats
 	store    *participant.PGStore
 }
 
 func newEnv(t *testing.T) env {
 	tx := postgres.NewTxManager(pool(t))
 	ms, ps := meeting.NewPGStore(tx), participant.NewPGStore(tx)
+	msvc := meeting.NewService(ms, nil, tx, nil, meeting.Config{})
 	svc := participant.NewService(participant.Deps{
-		Store: ps, Meetings: ms, Rooms: noopRooms{}, Signer: signer{}, Notifier: notifier{},
-		Tx: tx, LeaseTTL: time.Minute, PasswordLimit: func(context.Context, string) error { return nil },
+		Store: ps, Meetings: msvc, Notifier: notifier{}, Tx: tx,
+		PasswordLimit: func(context.Context, string) error { return nil },
 	})
-	return env{tx: tx, meetings: ms, parts: svc, store: ps}
+	seats := participant.NewSeats(participant.SeatDeps{
+		Store: ps, Meetings: msvc, Rooms: noopRooms{}, Signer: signer{}, Tx: tx, LeaseTTL: time.Minute,
+	})
+	return env{tx: tx, meetings: ms, svc: msvc, parts: svc, seats: seats, store: ps}
 }
 
 func (e env) createMeeting(t *testing.T, maxParticipants int, waitingRoom bool) meeting.Meeting {
@@ -106,7 +112,7 @@ func TestConcurrentSeatClaimsNeverExceedCapacity(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, pr := range principals {
 		wg.Go(func() {
-			if _, err := e.parts.IssueToken(context.Background(), pr); err == nil {
+			if _, err := e.seats.IssueToken(context.Background(), pr); err == nil {
 				granted.Add(1)
 			}
 		})
@@ -193,7 +199,7 @@ func TestExpiredMeetingsAreInvisible(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.meetings.Lookup(context.Background(), m.Code); err == nil {
+	if _, err := e.svc.Lookup(context.Background(), m.Code); err == nil {
 		t.Fatal("expired meeting must look like an unknown one before the worker runs")
 	}
 }

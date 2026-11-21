@@ -141,3 +141,18 @@ func TestCrossSiteRequestsRejected(t *testing.T) {
 		t.Fatalf("cross-site create = %d, want 403", resp.StatusCode)
 	}
 }
+
+// TestRepeatedTokenRequestsDoNotLockOut reproduces review finding SP4-1: a host
+// requesting tokens repeatedly (retries, StrictMode, UDP blocked) must never be
+// locked out of media.
+func TestRepeatedTokenRequestsDoNotLockOut(t *testing.T) {
+	host := newClient(t)
+	created := host.expect(201, "POST", "/api/v1/meetings", map[string]any{"displayName": "Host"})
+	m := "/api/v1/meetings/" + created["meeting"].(map[string]any)["code"].(string)
+	for range 5 {
+		host.expect(200, "POST", m+"/token", nil)
+	}
+	host.expect(204, "POST", m+"/leave", nil)
+	host.expect(200, "POST", m+"/join", map[string]any{"displayName": "Host"})
+	host.expect(200, "POST", m+"/token", nil)
+}

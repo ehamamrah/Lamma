@@ -127,10 +127,10 @@ func (s *Service) Mute(ctx context.Context, pr access.Principal, target uuid.UUI
 	if err := authorize(pr, access.ActionModerate); err != nil {
 		return err
 	}
-	if err := s.parts.RecordMute(ctx, pr.MeetingID, pr.ParticipantID, target); err != nil {
+	if err := s.room.MuteSource(ctx, pr.MeetingID.String(), target.String(), source); err != nil {
 		return err
 	}
-	return s.room.MuteSource(ctx, pr.MeetingID.String(), target.String(), source)
+	return s.parts.RecordMute(ctx, pr.MeetingID, pr.ParticipantID, target)
 }
 
 // UpdateSettings locks/unlocks the meeting or toggles the waiting room.

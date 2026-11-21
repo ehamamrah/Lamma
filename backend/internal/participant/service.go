@@ -10,19 +10,19 @@ import (
 	"github.com/ehamamrah/lamma/backend/internal/meeting"
 )
 
-// Store is the persistence port for participants.
+// Store is the persistence port for membership (join, waiting room, moderation).
 type Store interface {
 	LockMeeting(ctx context.Context, meetingID uuid.UUID) (MeetingLock, error)
 	Insert(ctx context.Context, n NewParticipant) (Participant, error)
 	Get(ctx context.Context, meetingID, id uuid.UUID) (Participant, error)
 	Transition(ctx context.Context, t Transition) (Participant, error)
+	RemoveGuest(ctx context.Context, meetingID, actor, target uuid.UUID) (previous access.Status, err error)
 	CountWaiting(ctx context.Context, meetingID uuid.UUID, origin []byte) (byOrigin, total int64, err error)
+	CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error)
 	ListWaiting(ctx context.Context, meetingID uuid.UUID) ([]Participant, error)
 	DenyAllWaiting(ctx context.Context, meetingID, actor uuid.UUID) ([]uuid.UUID, error)
-	CountSeats(ctx context.Context, meetingID, exclude uuid.UUID, origin []byte) (total, unconnected int64, err error)
-	ClaimLease(ctx context.Context, id uuid.UUID, ttl time.Duration) (leaseCount int, inRoom bool, err error)
+	HostID(ctx context.Context, meetingID uuid.UUID) (uuid.UUID, error)
 	ReleaseLease(ctx context.Context, id uuid.UUID) error
-	AnyoneInRoom(ctx context.Context, meetingID uuid.UUID) (bool, error)
 	Audit(ctx context.Context, meetingID, actor uuid.UUID, action string, target uuid.UUID) error
 }
 
@@ -54,35 +54,15 @@ type Transition struct {
 	Action    string
 }
 
-// Meetings is the subset of the meeting module this module reads.
-type Meetings interface {
+// MeetingLookup resolves meetings by public code.
+type MeetingLookup interface {
 	Lookup(ctx context.Context, code string) (meeting.Meeting, error)
-	GetOpenByID(ctx context.Context, id uuid.UUID) (meeting.Meeting, error)
-	MarkRoomCreated(ctx context.Context, id uuid.UUID) error
-}
-
-// Rooms creates LiveKit rooms (idempotent).
-type Rooms interface {
-	EnsureRoom(ctx context.Context, room string, maxParticipants int) error
-}
-
-// Grant describes a LiveKit token to sign.
-type Grant struct {
-	Room     string
-	Identity string
-	Name     string
-	Role     string
-}
-
-// TokenSigner signs LiveKit access tokens locally.
-type TokenSigner interface {
-	Sign(g Grant) (token string, expiresAt time.Time, err error)
 }
 
 // Notifier delivers waiting-room events (best effort, after commit).
 type Notifier interface {
 	Decided(ctx context.Context, participantID uuid.UUID, decision access.Status)
-	Waiting(ctx context.Context, meetingID uuid.UUID)
+	Waiting(ctx context.Context, meetingID, hostID uuid.UUID)
 }
 
 // PasswordVerifier checks meeting passwords (argon2 gate).
@@ -98,24 +78,22 @@ type Transactor interface {
 // RateCheck consumes one unit of a rate-limit policy for key.
 type RateCheck func(ctx context.Context, key string) error
 
-// Deps groups the service dependencies.
+// Deps groups the membership service dependencies.
 type Deps struct {
 	Store         Store
-	Meetings      Meetings
-	Rooms         Rooms
-	Signer        TokenSigner
+	Meetings      MeetingLookup
 	Notifier      Notifier
 	Passwords     PasswordVerifier
 	Tx            Transactor
 	PasswordLimit RateCheck
-	LeaseTTL      time.Duration
 }
 
-// Service implements the participant use cases.
+// Service implements joining, the waiting room and moderation state changes.
+// Seat leases and tokens live in Seats.
 type Service struct {
-	Deps
+	d   Deps
 	now func() time.Time
 }
 
 // NewService wires the participant service.
-func NewService(d Deps) *Service { return &Service{Deps: d, now: time.Now} }
+func NewService(d Deps) *Service { return &Service{d: d, now: time.Now} }

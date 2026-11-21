@@ -3,6 +3,7 @@ package participant
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -32,7 +33,7 @@ type JoinResult struct {
 // Join admits the caller, puts them in the waiting room, or resumes an
 // existing session (PLAN.md §9).
 func (s *Service) Join(ctx context.Context, in JoinInput) (JoinResult, error) {
-	m, err := s.Meetings.Lookup(ctx, in.Code)
+	m, err := s.d.Meetings.Lookup(ctx, in.Code)
 	if err != nil {
 		return JoinResult{}, err
 	}
@@ -76,10 +77,10 @@ func (s *Service) checkPassword(ctx context.Context, m meeting.Meeting, in JoinI
 	if in.Password == "" {
 		return errPasswordRequired
 	}
-	if err := s.PasswordLimit(ctx, in.IPKey+"|"+m.ID.String()); err != nil {
+	if err := s.d.PasswordLimit(ctx, in.IPKey+"|"+m.ID.String()); err != nil {
 		return err
 	}
-	ok, err := s.Passwords.Verify(ctx, m.PasswordHash, in.Password)
+	ok, err := s.d.Passwords.Verify(ctx, m.PasswordHash, in.Password)
 	if err != nil {
 		return err
 	}
@@ -93,13 +94,13 @@ func (s *Service) checkPassword(ctx context.Context, m meeting.Meeting, in JoinI
 // and waiting-room changes made concurrently by the host are respected.
 func (s *Service) insertGuest(ctx context.Context, meetingID uuid.UUID, n NewParticipant) (Participant, error) {
 	var p Participant
-	err := s.Tx.InTx(ctx, func(ctx context.Context) error {
+	err := s.d.Tx.InTx(ctx, func(ctx context.Context) error {
 		status, err := s.entryStatus(ctx, meetingID, n.Origin)
 		if err != nil {
 			return err
 		}
 		n.Status = status
-		p, err = s.Store.Insert(ctx, n)
+		p, err = s.d.Store.Insert(ctx, n)
 		return err
 	})
 	if err != nil {
@@ -110,7 +111,7 @@ func (s *Service) insertGuest(ctx context.Context, meetingID uuid.UUID, n NewPar
 
 // entryStatus must run inside a transaction: it locks the meeting row.
 func (s *Service) entryStatus(ctx context.Context, meetingID uuid.UUID, origin []byte) (access.Status, error) {
-	lock, err := s.Store.LockMeeting(ctx, meetingID)
+	lock, err := s.d.Store.LockMeeting(ctx, meetingID)
 	if err != nil {
 		return "", err
 	}
@@ -118,13 +119,26 @@ func (s *Service) entryStatus(ctx context.Context, meetingID uuid.UUID, origin [
 		return "", errLocked
 	}
 	if !lock.WaitingRoom {
-		return access.StatusAdmitted, nil
+		return access.StatusAdmitted, s.checkAdmittedCap(ctx, meetingID, lock.MaxParticipants)
 	}
 	return access.StatusWaiting, s.checkWaitingCaps(ctx, meetingID, origin)
 }
 
+// checkAdmittedCap bounds admitted guest rows (seats are enforced at token
+// time; this only stops unbounded row growth from scripted joins).
+func (s *Service) checkAdmittedCap(ctx context.Context, meetingID uuid.UUID, maxSeats int) error {
+	n, err := s.d.Store.CountAdmittedGuests(ctx, meetingID)
+	if err != nil {
+		return err
+	}
+	if n >= int64(admittedFactor*maxSeats) {
+		return errFull
+	}
+	return nil
+}
+
 func (s *Service) checkWaitingCaps(ctx context.Context, meetingID uuid.UUID, origin []byte) error {
-	byOrigin, total, err := s.Store.CountWaiting(ctx, meetingID, origin)
+	byOrigin, total, err := s.d.Store.CountWaiting(ctx, meetingID, origin)
 	if err != nil {
 		return err
 	}
@@ -134,16 +148,27 @@ func (s *Service) checkWaitingCaps(ctx context.Context, meetingID uuid.UUID, ori
 	return nil
 }
 
-// afterEntry runs post-commit side effects.
+// notifyTimeout bounds the best-effort host notification on the join path.
+const notifyTimeout = time.Second
+
+// afterEntry runs post-commit side effects: a waiting participant triggers a
+// signal to the host only (not the whole room).
 func (s *Service) afterEntry(ctx context.Context, p Participant) {
-	if p.Status == access.StatusWaiting {
-		s.Notifier.Waiting(context.WithoutCancel(ctx), p.MeetingID)
+	if p.Status != access.StatusWaiting {
+		return
 	}
+	host, err := s.d.Store.HostID(ctx, p.MeetingID)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+	defer cancel()
+	s.d.Notifier.Waiting(ctx, p.MeetingID, host)
 }
 
 // resume handles a join from a caller who already holds a session.
 func (s *Service) resume(ctx context.Context, m meeting.Meeting, pr access.Principal, origin []byte) (JoinResult, error) {
-	cur, err := s.Store.Get(ctx, m.ID, pr.ParticipantID)
+	cur, err := s.d.Store.Get(ctx, m.ID, pr.ParticipantID)
 	if err != nil {
 		return JoinResult{}, err
 	}
@@ -167,12 +192,12 @@ func (s *Service) resume(ctx context.Context, m meeting.Meeting, pr access.Princ
 // against the current lock and waiting-room settings and caps.
 func (s *Service) reenter(ctx context.Context, cur Participant, origin []byte) (Participant, error) {
 	var p Participant
-	err := s.Tx.InTx(ctx, func(ctx context.Context) error {
+	err := s.d.Tx.InTx(ctx, func(ctx context.Context) error {
 		status, err := s.entryStatus(ctx, cur.MeetingID, origin)
 		if err != nil {
 			return err
 		}
-		p, err = s.Store.Transition(ctx, Transition{
+		p, err = s.d.Store.Transition(ctx, Transition{
 			MeetingID: cur.MeetingID, ID: cur.ID, To: status,
 			From: []access.Status{access.StatusLeft, access.StatusWaiting},
 		})

@@ -1,0 +1,62 @@
+# Production: TLS termination for the app and LiveKit signaling.
+# Certificates: ${TLS_CERT_DIR} mounted at /etc/lamma/tls (app.crt/app.key, rtc.crt/rtc.key).
+upstream lamma_api { server api:8000; keepalive 32; }
+upstream lamma_rtc { server livekit:7880; }
+
+map $http_upgrade $connection_upgrade { default upgrade; "" close; }
+
+# Recover the real client address from the load balancer (PLAN §15).
+set_real_ip_from ${LB_CIDR};
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+
+server {
+  listen 8080 default_server;
+  location = /healthz { access_log off; return 200 "ok"; }
+  location / { return 301 https://$host$request_uri; }
+}
+
+server {
+  listen 8443 ssl;
+  http2 on;
+  server_name ${APP_DOMAIN};
+  ssl_certificate /etc/lamma/tls/app.crt;
+  ssl_certificate_key /etc/lamma/tls/app.key;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  root /usr/share/nginx/html;
+  include /tmp/conf.d/security-headers.inc;
+  add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
+  location ~ ^/api/v1/meetings/[^/]+/admission/events$ {
+    include /etc/nginx/proxy-api.inc;
+    proxy_buffering off;
+    proxy_read_timeout 60s;
+    proxy_pass http://lamma_api;
+  }
+  location /api/ { include /etc/nginx/proxy-api.inc; proxy_pass http://lamma_api; }
+  location /internal/ { return 404; }
+  location / {
+    include /tmp/conf.d/security-headers.inc;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    try_files $uri /index.html;
+  }
+}
+
+server {
+  listen 8443 ssl;
+  http2 on;
+  server_name ${RTC_DOMAIN};
+  ssl_certificate /etc/lamma/tls/rtc.crt;
+  ssl_certificate_key /etc/lamma/tls/rtc.key;
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  location / {
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_read_timeout 1h;
+    proxy_pass http://lamma_rtc;
+  }
+}

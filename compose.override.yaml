@@ -1,0 +1,9 @@
+# Development overlay — loaded automatically by `docker compose up --build`.
+services:
+  api:
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]   # local tools only; never on public interfaces
+  redis:
+    ports: ["127.0.0.1:6379:6379"]

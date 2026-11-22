@@ -826,3 +826,28 @@ or recorded in `docs/review-log.md` with justification.
    collateral damage behind NAT)? Current answer: no.
 3. CAPTCHA provider, if abuse data ever justifies one (deferred, A8).
 4. Domain/TLS strategy for production LiveKit (separate subdomain recommended).
+
+---
+
+## 21. Implementation Notes (drift from the original plan)
+
+- **Audit writes:** the state change and its audit row are two statements
+  in one transaction, not a single CTE. The effect is the same.
+- **Extra modules:** `admission` (SSE hub) and `maintenance` (worker loop)
+  are separate modules. `participant` is split into `Service`
+  (membership), `Seats` (leases and tokens) and `Presence` (webhooks).
+- **Schema additions:** `participants.status_at` (how fresh a waiting
+  entry is), `participants.origin_hash`, `meetings.room_created_at` and
+  `meetings.sweep_after`, plus partial indexes for the workers.
+  `moderation_events.actor_id` is nullable (NULL means a system action).
+- **Admitted cap:** at most 4× capacity, counting only guests active in
+  the last 30 minutes.
+- **LiveKit client:** the API uses the `livekit/protocol` Twirp client
+  directly instead of `server-sdk-go`, which would pull in a WebRTC client
+  stack.
+- **Migrations:** run by the API image (`api migrate up`) in the one-shot
+  `migrate` service.
+- **Port names in code:** `Participants`, `Room`, `TokenSigner`,
+  `SeatStore` and similar. See each module's `service.go`.
+- **ADRs:** summarised in §14. The review history is in
+  `docs/review-log.md`.

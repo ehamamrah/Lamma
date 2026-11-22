@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27.4"
+  NODE_VERSION: "24"
+
+jobs:
+  backend-lint:
+    name: Go format & lint
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with: { go-version: "${{ env.GO_VERSION }}", cache-dependency-path: backend/go.sum }
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with: { working-directory: backend, version: latest }
+      - name: sqlc generated code is up to date
+        run: docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.31.1 diff
+
+  backend-test:
+    name: Go unit tests (race)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with: { go-version: "${{ env.GO_VERSION }}", cache-dependency-path: backend/go.sum }
+      - run: go test -race -count=1 -cover ./...
+
+  frontend:
+    name: Frontend lint, typecheck & tests
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  stack:
+    name: Docker build, integration & e2e
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with: { go-version: "${{ env.GO_VERSION }}", cache-dependency-path: backend/go.sum }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Start stack
+        run: |
+          docker compose up -d --build
+          timeout 300 sh -c 'until curl -sf http://localhost:8080/healthz >/dev/null; do sleep 3; done'
+          docker compose ps
+      - name: Postgres integration & API e2e tests
+        working-directory: backend
+        run: |
+          docker run --rm --network lamma_lamma -v "$PWD:/src" -w /src \
+            -e LAMMA_API=http://api:8000 \
+            -e LAMMA_TEST_DATABASE_URL="postgres://lamma_app:lamma-dev-only-app@postgres:5432/lamma?sslmode=disable" \
+            golang:${{ env.GO_VERSION }} go test -race -count=1 -tags=integration,e2e ./integration/... ./e2e/...
+      - name: Browser e2e (two participants, real media)
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -300
+      - name: Shutdown
+        if: always()
+        run: docker compose down -v
+
+  security:
+    name: Security & dependency scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with: { go-version: "${{ env.GO_VERSION }}", cache-dependency-path: backend/go.sum }
+      - name: govulncheck
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "${{ env.NODE_VERSION }}" }
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  images:
+    name: Image scan
+    runs-on: ubuntu-latest
+    needs: [backend-lint]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with: { context: backend, load: true, tags: "lamma/api:ci" }
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with: { context: frontend, load: true, tags: "lamma/web:ci" }
+      - name: Trivy image scan (api)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: { image-ref: "lamma/api:ci", severity: "CRITICAL,HIGH", exit-code: "1", ignore-unfixed: true }
+      - name: Trivy image scan (web)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: { image-ref: "lamma/web:ci", severity: "CRITICAL,HIGH", exit-code: "1", ignore-unfixed: true }

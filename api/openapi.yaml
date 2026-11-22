@@ -1,0 +1,402 @@
+openapi: 3.1.0
+info:
+  title: Lamma API
+  version: 1.0.0
+  description: |
+    REST API of the Lamma video meeting service. The React app talks to the Go
+    backend only through these endpoints. Media goes directly to LiveKit
+    using the token from `POST /meetings/{code}/token`.
+
+    Auth: an HttpOnly session cookie (`lamma_sid`, or `__Secure-lamma_sid` in
+    production) scoped to `/api/v1/meetings/{code}`. Unsafe methods must come
+    from the app's origin (Origin / Sec-Fetch-Site). Errors use RFC 9457
+    problem details with a stable `code`.
+servers:
+  - url: /api/v1
+
+tags:
+  - name: meetings
+  - name: participants
+  - name: chat
+  - name: host
+    description: Host session required; every call is authorized server-side.
+
+paths:
+  /meetings:
+    post:
+      tags: [meetings]
+      summary: Create a meeting (caller becomes host, session cookie set)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMeeting' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meeting: { $ref: '#/components/schemas/Meeting' }
+                  participant:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      role: { type: string, const: host }
+                      status: { type: string, const: admitted }
+        '400': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    get:
+      tags: [meetings]
+      summary: Public meeting info (unknown, ended and expired all return 404)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Meeting' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/join:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    post:
+      tags: [participants]
+      summary: Join, or resume an existing session (idempotent with a valid cookie)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName]
+              additionalProperties: false
+              properties:
+                displayName: { type: string, minLength: 1, maxLength: 40 }
+                password: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/ParticipantOK' }
+        '202':
+          description: Placed in the waiting room
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParticipantEnvelope' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/me:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    get:
+      tags: [participants]
+      summary: The caller's participant
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participant: { $ref: '#/components/schemas/Participant' }
+                  meetingOpen: { type: boolean }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/token:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    post:
+      tags: [participants]
+      summary: Claim a seat and get a short-lived LiveKit token (admitted only)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenGrant' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/leave:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    post:
+      tags: [participants]
+      summary: Leave (session kept so the caller can rejoin)
+      responses:
+        '204': { description: Left }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/admission/events:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    get:
+      tags: [participants]
+      summary: Waiting-room decisions (Server-Sent Events)
+      description: |
+        Events: `decision` (data = admitted | denied | removed | left),
+        `timeout` and `shutdown` (reconnect). Comment heartbeats every 25s.
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream: { schema: { type: string } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/chat:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    get:
+      tags: [chat]
+      summary: Recent messages (up to 100, oldest first)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChatMessage' }
+    post:
+      tags: [chat]
+      summary: Send a message (delivered to the room by LiveKit, topic `lamma.chat`)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              additionalProperties: false
+              properties:
+                text: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '201':
+          description: Sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/participants:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    get:
+      tags: [host]
+      summary: Waiting-room list (max 100)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items: { $ref: '#/components/schemas/Participant' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/participants/deny-waiting:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    post:
+      tags: [host]
+      summary: Deny everyone waiting
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { denied: { type: integer } } }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/participants/{id}/admit:
+    parameters: [{ $ref: '#/components/parameters/Code' }, { $ref: '#/components/parameters/ID' }]
+    post:
+      tags: [host]
+      summary: Admit a waiting participant
+      responses:
+        '204': { description: Admitted }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/participants/{id}/deny:
+    parameters: [{ $ref: '#/components/parameters/Code' }, { $ref: '#/components/parameters/ID' }]
+    post:
+      tags: [host]
+      summary: Deny a waiting participant
+      responses:
+        '204': { description: Denied }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/participants/{id}/remove:
+    parameters: [{ $ref: '#/components/parameters/Code' }, { $ref: '#/components/parameters/ID' }]
+    post:
+      tags: [host]
+      summary: Remove a guest (session revoked, disconnected from LiveKit)
+      responses:
+        '204': { description: Removed }
+        '202': { $ref: '#/components/responses/LiveKitPending' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/participants/{id}/mute:
+    parameters: [{ $ref: '#/components/parameters/Code' }, { $ref: '#/components/parameters/ID' }]
+    post:
+      tags: [host]
+      summary: Server-mute a source (hosts can never unmute others)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string, enum: [microphone, camera, screen_share] }
+      responses:
+        '204': { description: Muted }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/settings:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    patch:
+      tags: [host]
+      summary: Lock/unlock or toggle the waiting room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                locked: { type: boolean }
+                waitingRoom: { type: boolean }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locked: { type: boolean }
+                  waitingRoom: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /meetings/{code}/end:
+    parameters: [{ $ref: '#/components/parameters/Code' }]
+    post:
+      tags: [host]
+      summary: End the meeting for everyone
+      responses:
+        '204': { description: Ended }
+        '202': { $ref: '#/components/responses/LiveKitPending' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+components:
+  parameters:
+    Code:
+      name: code
+      in: path
+      required: true
+      description: Canonical meeting code (lowercase Crockford base32)
+      schema: { type: string, pattern: '^[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}$' }
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Problem:
+      description: Error (RFC 9457). 429/503 include Retry-After.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ParticipantOK:
+      description: Admitted (or resumed)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ParticipantEnvelope' }
+    LiveKitPending:
+      description: Committed; the LiveKit side effect is retried by the reconciler
+      content:
+        application/json:
+          schema: { type: object, properties: { livekitPending: { type: boolean, const: true } } }
+
+  schemas:
+    CreateMeeting:
+      type: object
+      required: [displayName]
+      additionalProperties: false
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 40 }
+        title: { type: string, maxLength: 120 }
+        password: { type: string, minLength: 8, maxLength: 64 }
+        waitingRoom: { type: boolean, default: false }
+        expiresInMinutes: { type: integer, minimum: 15, description: 'Default 24h, max MEETING_MAX_TTL' }
+    Meeting:
+      type: object
+      properties:
+        code: { type: string }
+        url: { type: string, description: Only in the create response }
+        title: { type: string }
+        requiresPassword: { type: boolean }
+        waitingRoom: { type: boolean }
+        locked: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+    Participant:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string }
+        role: { type: string, enum: [host, guest] }
+        status: { type: string, enum: [waiting, admitted, denied, removed, left] }
+    ParticipantEnvelope:
+      type: object
+      properties:
+        participant: { $ref: '#/components/schemas/Participant' }
+    TokenGrant:
+      type: object
+      properties:
+        token: { type: string, description: LiveKit JWT, valid ~2 minutes }
+        url: { type: string, description: LiveKit signalling URL }
+        expiresAt: { type: string, format: date-time }
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string }
+        participantId: { type: string, format: uuid }
+        displayName: { type: string }
+        text: { type: string }
+        sentAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          examples: [not_found, meeting_locked, meeting_full, waiting_room_full, invalid_password, rate_limited, livekit_unavailable]

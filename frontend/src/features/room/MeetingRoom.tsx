@@ -23,8 +23,11 @@ import { useReactions } from '@/features/reactions/useReactions';
 import { RecordingBadge } from '@/features/recording/RecordingBadge';
 import { useRecording } from '@/features/recording/useRecording';
 import { useCollabSync } from '@/features/collab/useCollabSync';
+import { EffectsPicker } from '@/features/effects/EffectsPicker';
+import { processorIfActive, useRoomCameraEffects } from '@/features/effects/useCameraEffects';
 import type { Action } from './actions';
 import { ControlBar, type Panel } from './ControlBar';
+import { PanelHeader } from './PanelHeader';
 import { roomOptions } from './roomOptions';
 import { Stage } from './Stage';
 
@@ -36,8 +39,12 @@ export function MeetingRoom({ code }: { code: string }) {
     () => (devices.audio ? { deviceId: devices.audioDeviceId } : false),
     [devices.audio, devices.audioDeviceId],
   );
+  // With an effect already chosen, the processor is attached before the
+  // camera is published, so the first frame others see is already processed.
+  // (Creating one is cheap: no work starts until LiveKit initialises it.)
   const video = useMemo(
-    () => (devices.video ? { deviceId: devices.videoDeviceId } : false),
+    () =>
+      devices.video ? { deviceId: devices.videoDeviceId, processor: processorIfActive() } : false,
     [devices.video, devices.videoDeviceId],
   );
   if (!grant) return null;
@@ -74,6 +81,7 @@ function RoomLayout({ code }: { code: string }) {
   const isHost = useMeetingStore((s) => s.me?.role === 'host'); // display only
   const react = useReactions();
   useCollabSync(isHost);
+  useRoomCameraEffects();
   const bar = { code, panel, onPanel: setPanel, onReact: react };
 
   return (
@@ -93,6 +101,12 @@ function RoomLayout({ code }: { code: string }) {
         >
           {panel === 'chat' && <ChatPanel code={code} onClose={() => setPanel(null)} />}
           {panel === 'people' && <ParticipantsPanel code={code} onClose={() => setPanel(null)} />}
+          {panel === 'effects' && (
+            <div className="flex h-full flex-col">
+              <PanelHeader title="Effects" onClose={() => setPanel(null)} />
+              <EffectsPicker className="overflow-y-auto p-4" />
+            </div>
+          )}
         </aside>
       </div>
       {isHost ? <HostControls {...bar} /> : <ControlBar {...bar} />}

@@ -1,6 +1,6 @@
 import { TrackToggle, useTrackToggle } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { Ellipsis, Link2, LogOut, MessageSquare, MonitorUp, Users } from 'lucide-react';
+import { Ellipsis, Link2, LogOut, MessageSquare, MonitorUp, Sparkles, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/shared/ui/button';
 import { useIsMobile } from '@/shared/lib/useMediaQuery';
@@ -9,7 +9,7 @@ import { ReactionPicker } from '@/features/reactions/ReactionPicker';
 import type { Emoji } from '@/features/reactions/reactions';
 import { type Action, ActionButton, MoreSheet } from './actions';
 
-export type Panel = 'chat' | 'people' | 'host' | null;
+export type Panel = 'chat' | 'people' | 'host' | 'effects' | null;
 
 interface Props {
   code: string;
@@ -37,8 +37,8 @@ export function ControlBar({ code, panel, onPanel, onReact, extra = [] }: Props)
       className="relative flex items-center justify-center gap-2 border-t border-border p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:flex-wrap md:p-3"
       aria-label="Meeting controls"
     >
-      <TrackToggle source={Track.Source.Microphone} />
-      <TrackToggle source={Track.Source.Camera} />
+      <TrackToggle source={Track.Source.Microphone} aria-label="Microphone" />
+      <TrackToggle source={Track.Source.Camera} aria-label="Camera" />
       <ReactionPicker onReact={onReact} />
       <ActionButton
         action={{
@@ -98,6 +98,13 @@ function useSecondaryActions(code: string, panel: Panel, onPanel: (p: Panel) => 
       icon: <Users />,
       active: panel === 'people',
       onClick: () => onPanel(panel === 'people' ? null : 'people'),
+    },
+    {
+      key: 'effects',
+      label: 'Effects',
+      icon: <Sparkles />,
+      active: panel === 'effects',
+      onClick: () => onPanel(panel === 'effects' ? null : 'effects'),
     },
     {
       key: 'copy',

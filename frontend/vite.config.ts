@@ -3,9 +3,11 @@ import { fileURLToPath, URL } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { visionBase } from './scripts/vision-paths.mjs';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: { __VISION_BASE__: JSON.stringify(visionBase) },
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: {
     // `npm run dev` with the Docker stack running: API calls go through Nginx.

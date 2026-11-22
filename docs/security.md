@@ -101,6 +101,18 @@ Accepted risks:
 - **Frontend:** no `innerHTML`. Chat only accepts data messages sent by the
   server. Tokens live only in memory.
 
+## Camera effects
+
+- Frames are processed in the browser only. Uploaded background images are
+  decoded locally and never sent or saved.
+- While a background is selected, nothing unprocessed is published. If the
+  segmentation model hasn't loaded yet, a heavily blurred frame is sent.
+- The MediaPipe runtime and models are self-hosted under `/vision/`, so no
+  third-party origins are added to the CSP. `script-src` gains
+  `'wasm-unsafe-eval'`, which lets WebAssembly compile but still forbids
+  JavaScript `eval`. Models are pinned by SHA-256 at build time, and the
+  wasm comes from the pinned npm package.
+
 ## Infrastructure
 
 - Containers run as non-root with a read-only root filesystem,

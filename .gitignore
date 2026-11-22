@@ -21,3 +21,4 @@ node_modules/
 .vscode/
 test-results/
 playwright-report/
+/frontend/public/vision/

@@ -1,15 +1,18 @@
 import { useMediaDeviceSelect, usePreviewTracks } from '@livekit/components-react';
 import { Track, type LocalVideoTrack } from 'livekit-client';
-import { Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { Mic, MicOff, Sparkles, Video, VideoOff } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/shared/ui/button';
 import { useMeetingStore } from '@/stores/meeting';
+import { EffectsPicker } from '@/features/effects/EffectsPicker';
+import { useCameraEffects } from '@/features/effects/useCameraEffects';
 
 /** Local camera/microphone preview with toggles and device selection. */
 export function DevicePreview() {
   const devices = useMeetingStore((s) => s.devices);
   const set = useMeetingStore((s) => s.set);
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [showEffects, setShowEffects] = useState(false);
   const options = useMemo(
     () => ({
       audio: devices.audio ? { deviceId: devices.audioDeviceId } : false,
@@ -22,6 +25,7 @@ export function DevicePreview() {
   const onDeviceError = useCallback((e: Error) => setDeviceError(e.message), []);
   const tracks = usePreviewTracks(options, onDeviceError);
   const video = tracks?.find((t) => t.kind === Track.Kind.Video) as LocalVideoTrack | undefined;
+  useCameraEffects(video);
 
   return (
     <section className="flex flex-col gap-3" aria-label="Device preview">
@@ -45,6 +49,16 @@ export function DevicePreview() {
         >
           {devices.video ? <Video /> : <VideoOff />}
         </Button>
+        {devices.video && (
+          <Button
+            type="button"
+            variant={showEffects ? 'default' : 'secondary'}
+            aria-pressed={showEffects}
+            onClick={() => setShowEffects((v) => !v)}
+          >
+            <Sparkles /> Effects
+          </Button>
+        )}
         <DeviceSelect
           kind="audioinput"
           label="Microphone"
@@ -56,6 +70,7 @@ export function DevicePreview() {
           onChange={(id) => set({ devices: { ...devices, videoDeviceId: id } })}
         />
       </div>
+      {showEffects && devices.video && <EffectsPicker />}
       {deviceError && (
         <p className="text-sm text-muted-foreground">
           Could not access your devices ({deviceError}). You can still join.

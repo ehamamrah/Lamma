@@ -60,7 +60,7 @@ no module can call another module's queries.
 
 - `features/*`: one folder per screen or feature (home, meeting, prejoin,
   waiting, room, chat, participants, moderation, reactions, whiteboard,
-  recording).
+  recording, effects).
 - Stage transitions all live in `features/meeting/session.ts`. Components
   call those functions; they never write the stage directly.
 - `stores/meeting.ts` (Zustand) holds meeting, session and device
@@ -79,6 +79,16 @@ no module can call another module's queries.
   a screen share takes focus, with the cameras in a strip beside it
   (desktop) or below it (phone). Recording media never leaves the host's
   browser; only the on/off flag is shared.
+- **Camera effects** (`features/effects`) are a LiveKit `TrackProcessor`.
+  Each camera frame is drawn on a canvas: the background is replaced using
+  MediaPipe's selfie segmenter, and face masks are drawn from the face
+  landmarker's points. LiveKit publishes `canvas.captureStream()` instead of
+  the camera. The processor is attached only while an effect is on. If an
+  effect is chosen before joining, it goes into the capture options so the
+  first published frame is already processed. MediaPipe is code-split and
+  loaded on first use. Its wasm and models are served from `/vision/` on
+  our own origin. `scripts/vision-assets.mjs` copies and downloads them at
+  build time and verifies their checksums.
 - `shared/api`: the typed client for our REST API (`/api/v1`), described in
   [api/openapi.yaml](../api/openapi.yaml).
 

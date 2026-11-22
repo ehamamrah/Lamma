@@ -4,3 +4,4 @@ package-lock.json
 nginx
 test-results
 playwright-report
+public/vision

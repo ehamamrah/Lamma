@@ -675,6 +675,7 @@ Full ADRs go in `docs/adr/NNNN-*.md` in Phase 1 review.
 | 016 | No participant cap; host gates entry with lock / waiting room | Product requirement: anyone with the link can join | Fixed `max_participants` |
 | 017 | Reactions and whiteboard over LiveKit data messages, verified by receivers against server-signed roles | Drawing needs low latency; no new server component | Server relay (latency, load), CRDT service (overkill) |
 | 018 | Recording in the host's browser (screen capture + MediaRecorder), downloaded locally | No extra infrastructure or storage; everyone sees an indicator | LiveKit Egress (heavy service plus object storage); can be added later |
+| 019 | Camera effects in the browser: our own LiveKit `TrackProcessor` with MediaPipe tasks-vision (CPU delegate), wasm and models self-hosted under versioned `/vision/<ver>/` | One pipeline for both backgrounds and masks; video never leaves the device unprocessed; no third-party origin in the CSP (only `'wasm-unsafe-eval'` added). Models pinned by SHA-256 and downloaded at build time (the build needs Google model storage). Inference runs at half the frame rate on a 256 px input to bound CPU | `@livekit/track-processors` (background only, older MediaPipe, can't combine with masks); loading from a CDN (CSP and privacy); server-side processing (latency, cost, sees raw video) |
 
 ### Dependency list (each justified)
 
@@ -687,8 +688,9 @@ Backend: `go-chi/chi/v5`, `jackc/pgx/v5`, `sqlc` (codegen), `redis/go-redis/v9`,
 (unit), `stretchr/testify` (assertions only).
 
 Frontend: React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui, Zustand,
-React Router, `livekit-client`, `@livekit/components-react`, Vitest, Testing
-Library, ESLint, Prettier.
+React Router, `livekit-client`, `@livekit/components-react`,
+`@mediapipe/tasks-vision` (camera effects, code-split, ADR-019), Vitest,
+Testing Library, ESLint, Prettier.
 
 ---
 
@@ -856,5 +858,10 @@ or recorded in `docs/review-log.md` with justification.
 - **Data publishing:** tokens now allow data publishing (ADR-017). This
   replaces part of ADR-004: chat still goes through the API, but reactions
   and the whiteboard are peer to peer.
+- **Camera effects** (ADR-019): the room `Panel` includes `'effects'`. A
+  processor belongs to its LiveKit track: stopping the track destroys it.
+  The app attaches one at capture time (capture options at join, a getter
+  on `room.options.videoCaptureDefaults` afterwards) so no unprocessed frame
+  is published, and removes it when no effect is chosen.
 - **ADRs:** summarised in §14. The review history is in
   `docs/review-log.md`.

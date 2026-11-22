@@ -204,3 +204,27 @@ Re-verification: **PASS WITH CHANGES** — SP4-1 confirmed fixed live; one new M
 | BA7-5..7 | Med/Low | Stale capacity and data-grant wording in PLAN, docs and comments | Updated (A4, §5, §6, ADR-004/013, test plan) |
 | BA7-8..12 | Low | Store/feature import cycle, empty full-screen aside behind the host panel, clipboard rejection, timers, down-migration default | Protocol moved to `features/collab`; aside hidden for the host panel; caught errors; timers cleared; `DROP DEFAULT` |
 | Bug | — | Waiting room flickered after granting camera access | Stable `usePreviewTracks` error callback (it re-created tracks every render); browser e2e asserts no repeated `getUserMedia` |
+
+## Phase 8 — Camera effects (backgrounds and face masks)
+
+- security-performance-reviewer: **PASS WITH CHANGES** (no High).
+- backend-architect: **APPROVE WITH CHANGES**.
+
+| # | Sev | Finding | Resolution |
+| --- | --- | --- | --- |
+| BA8-1 | **High** | A frame that threw drew the raw camera, even with a background on | Failing frames send the privacy blur when a background is set |
+| BA8-2 | Med | Worker load failures are async, so the interval fallback never ran | `onerror` switches to `setInterval` |
+| BA8-3 | Med | A camera first turned on mid-meeting was published before the processor attached | Processor supplied through `room.options.videoCaptureDefaults`; e2e covers it |
+| BA8-4 | Med | Second `<video>` decoding the same track | Reuses the element LiveKit passes in |
+| BA8-5 / SP8-3 | Med | Both models at 30 fps on full-size frames on the main thread | Models alternate (15 fps each); segmentation input is 256 px wide |
+| BA8-6 | Med | Per-processor timestamps could go backwards on the shared models | One monotonic clock in `vision.ts` |
+| SP8-1/2 | Med | 14.7 MB wasm gzipped per request (CPU DoS); prod had no compression | Precompressed `.gz` at build, `gzip_static`, `gzip off` for `/vision/`, 4 connections per IP |
+| SP8-4 | Med | Blocked `localStorage` threw at import and broke prejoin and the room | Storage access wrapped; choices just aren't remembered |
+| SP8-5..8 | Low | `save`/`restore` not exception-safe; stale mask after device switch; shared default processor instance; decompression-bomb images | `try/finally`; mask reset on restart; a fresh processor per capture (getter); 40 MP cap and downscale to 1920 px |
+| SP8-9/10/11 | Low | Canvases kept after destroy; unversioned 7-day cache; no fetch timeout | Canvases freed; versioned folder, immutable cache; 120 s timeout |
+| BA8-7..13 | Low | Store injected for testability, swatch typing, stale toggle closure, warning on unmount, ADR missing | Fixed; ADR-019 added |
+| BA8-9 | Low | Some mask/scene drawing functions exceed 15 lines | **Kept**: straight-line drawing code; splitting adds no clarity |
+| BA8-10 | Low | Hand-written persistence instead of zustand `persist` | **Kept**: a few lines, and storage errors must be swallowed explicitly |
+| SP8-9b | Low | MediaPipe instances never closed after leaving | **Accepted**: reused on the next meeting in the same tab; freed when the tab closes |
+| Bug | — | Mic and camera buttons in the control bar had no accessible name | Labelled "Microphone" and "Camera" |
+

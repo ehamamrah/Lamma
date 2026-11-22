@@ -44,7 +44,7 @@ func (c Cookies) Name() string {
 // Set scopes the cookie to the meeting's API path so a browser can hold
 // independent sessions in many meetings.
 func (c Cookies) Set(w http.ResponseWriter, code, token string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is false only in dev over http; production guard enforces true
 		Name:     c.Name(),
 		Value:    token,
 		Path:     "/api/v1/meetings/" + code,

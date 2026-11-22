@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Alert } from '@/shared/ui/alert';
 import { Button } from '@/shared/ui/button';
 import { Card, CardDescription, CardTitle } from '@/shared/ui/card';
@@ -10,7 +11,9 @@ import { DevicePreview } from './DevicePreview';
 
 /** Device preview plus, for new visitors, name and password entry. */
 export function PreJoin({ code }: { code: string }) {
-  const { meeting, me, stage, error } = useMeetingStore();
+  const { meeting, me, stage, error } = useMeetingStore(
+    useShallow((s) => ({ meeting: s.meeting, me: s.me, stage: s.stage, error: s.error })),
+  );
   const [name, setName] = useState(me?.displayName ?? '');
   const [password, setPassword] = useState('');
   const hasSession = me !== null && me.status === 'admitted';

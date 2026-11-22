@@ -3,6 +3,8 @@ import type { Participant } from 'livekit-client';
 import { MicOff, UserMinus, VolumeX } from 'lucide-react';
 import { errorMessage } from '@/shared/api/client';
 import { api } from '@/shared/api/meetings';
+import { useState } from 'react';
+import { Alert } from '@/shared/ui/alert';
 import { Badge } from '@/shared/ui/badge';
 import { Button } from '@/shared/ui/button';
 import { useMeetingStore } from '@/stores/meeting';
@@ -20,11 +22,13 @@ function roleOf(p: Participant): string | undefined {
 export function ParticipantsPanel({ code, onClose }: { code: string; onClose: () => void }) {
   const participants = useParticipants();
   const isHost = useMeetingStore((s) => s.me?.role === 'host');
-  const setError = (err: unknown) => useMeetingStore.getState().set({ error: errorMessage(err) });
+  const [error, setErrorText] = useState<string | null>(null);
+  const setError = (err: unknown) => setErrorText(errorMessage(err));
 
   return (
     <div className="flex h-full flex-col">
       <PanelHeader title={`People (${participants.length})`} onClose={onClose} />
+      {error && <Alert className="m-3">{error}</Alert>}
       <ul className="flex flex-col divide-y divide-border overflow-y-auto">
         {participants.map((p) => (
           <li key={p.identity} className="flex items-center gap-2 px-4 py-3">

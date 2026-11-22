@@ -54,8 +54,8 @@ type createRequest struct {
 	ExpiresInMinutes int    `json:"expiresInMinutes"`
 }
 
-// MeetingDTO is the public view of a meeting.
-type MeetingDTO struct {
+// DTO is the public view of a meeting.
+type DTO struct {
 	Code             string    `json:"code"`
 	URL              string    `json:"url,omitempty"`
 	Title            string    `json:"title"`
@@ -113,8 +113,8 @@ func (h *Handler) lookup(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, h.toDTO(m, false))
 }
 
-func (h *Handler) toDTO(m Meeting, withURL bool) MeetingDTO {
-	dto := MeetingDTO{
+func (h *Handler) toDTO(m Meeting, withURL bool) DTO {
+	dto := DTO{
 		Code: m.Code, Title: m.Title, RequiresPassword: m.RequiresPassword(),
 		WaitingRoom: m.WaitingRoom, Locked: m.Locked, ExpiresAt: m.ExpiresAt,
 	}

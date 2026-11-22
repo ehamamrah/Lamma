@@ -6,7 +6,7 @@ upstream lamma_api {
 server {
   listen 8080;
   root /usr/share/nginx/html;
-  include /tmp/security-headers.inc;
+  include /tmp/nginx/security-headers.inc;
 
   location = /healthz {
     access_log off;
@@ -34,14 +34,14 @@ server {
   location = /metrics { return 404; }
 
   location /assets/ {
-    include /tmp/security-headers.inc;
+    include /tmp/nginx/security-headers.inc;
     add_header Cache-Control "public, max-age=31536000, immutable" always;
     try_files $uri =404;
   }
 
   location / {
     add_header Cache-Control "no-cache" always;
-    include /tmp/security-headers.inc;
+    include /tmp/nginx/security-headers.inc;
     try_files $uri /index.html;
   }
 }

@@ -42,7 +42,7 @@ func (s *server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 	case <-gctx.Done():
 	}
-	err := s.shutdown()
+	err := s.shutdown() //nolint:contextcheck // shutdown must outlive the cancelled run context
 	cancelWorkers()
 	return errors.Join(err, g.Wait())
 }

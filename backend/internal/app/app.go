@@ -62,7 +62,7 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer infra.Close()
+	defer func() { _ = infra.Close() }() //nolint:contextcheck // runs after shutdown
 	return newServer(cfg, infra).Run(ctx)
 }
 
@@ -97,7 +97,7 @@ func healthcheck(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("liveness status %d", resp.StatusCode)
 	}

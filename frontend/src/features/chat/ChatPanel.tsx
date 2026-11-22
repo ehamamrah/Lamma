@@ -13,7 +13,11 @@ export function ChatPanel({ code, onClose }: { code: string; onClose: () => void
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [messages]);
+  useEffect(() => {
+    // Block body on purpose: newer browsers return a Promise from scrollIntoView,
+    // and an effect must return nothing or a cleanup function.
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

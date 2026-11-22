@@ -2,10 +2,15 @@ import { DisconnectReason } from 'livekit-client';
 import { ApiError, errorMessage } from '@/shared/api/client';
 import { api } from '@/shared/api/meetings';
 import type { Participant, Status } from '@/shared/api/types';
-import { type Stage, useMeetingStore } from '@/stores/meeting';
+import { type MeetingPatch, type Stage, useMeetingStore } from '@/stores/meeting';
 
-const set = (patch: Parameters<ReturnType<typeof useMeetingStore.getState>['set']>[0]) =>
-  useMeetingStore.getState().set(patch);
+// All stage transitions live in this module; components call these functions
+// instead of writing `stage` themselves.
+
+const set = (patch: MeetingPatch) => useMeetingStore.getState().set(patch);
+
+/** The meeting currently loaded; guards against responses for a previous code. */
+let currentCode: string | null = null;
 
 /** Maps the server-side participant status to the UI stage. */
 export function stageFor(me: Participant | null): Stage {
@@ -19,14 +24,45 @@ export function stageFor(me: Participant | null): Stage {
 
 /** Loads public meeting info and the caller's session (if any). */
 export async function loadSession(code: string): Promise<void> {
+  currentCode = code;
   useMeetingStore.getState().reset();
   try {
     const [meeting, me] = await Promise.all([api.getMeeting(code), api.me(code)]);
-    set({ meeting, me, stage: stageFor(me) });
+    if (currentCode === code) set({ meeting, me, stage: stageFor(me) });
   } catch (err) {
+    if (currentCode !== code) return;
     const notFound = err instanceof ApiError && err.status === 404;
     set({ stage: notFound ? 'not_found' : 'error', error: errorMessage(err) });
   }
+}
+
+/** Clears all meeting state when the meeting page unmounts. */
+export function closeSession() {
+  currentCode = null;
+  useMeetingStore.getState().reset();
+}
+
+/** Applies a waiting-room decision (or the status found after a stream error). */
+export function applyAdmission(code: string, status: Status | 'gone') {
+  if (status === 'admitted') void enterRoom(code);
+  else if (status === 'denied' || status === 'removed' || status === 'left') set({ stage: status });
+  else if (status === 'gone') set({ stage: 'not_found' });
+}
+
+/** Ends the meeting for everyone (host). Returns an error message, if any. */
+export async function endMeeting(code: string): Promise<string | null> {
+  try {
+    await api.host.end(code);
+    set({ grant: null, stage: 'ended' });
+    return null;
+  } catch (err) {
+    return errorMessage(err);
+  }
+}
+
+/** Handles a failure to connect to LiveKit. */
+export function onRoomError() {
+  set({ grant: null, stage: 'error', error: 'Could not connect to the media server.' });
 }
 
 /** Joins (or resumes), then enters the room or the waiting room. */

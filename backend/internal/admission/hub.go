@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -49,7 +50,7 @@ func NewHub(rdb *redis.Client, limits Limits, gauge prometheus.Gauge) *Hub {
 }
 
 var errTooManyStreams = apperr.New(apperr.KindRateLimited, "too_many_streams",
-	"Too many open waiting-room connections.")
+	"Too many open waiting-room connections.").WithRetry(10 * time.Second)
 
 // Register subscribes to decisions for participant id. release must be called.
 func (h *Hub) Register(id uuid.UUID, ipKey string) (<-chan access.Status, func(), error) {
@@ -100,7 +101,7 @@ func (h *Hub) Decided(ctx context.Context, id uuid.UUID, status access.Status) {
 // reconnects the subscription automatically.
 func (h *Hub) Run(ctx context.Context) error {
 	ps := h.rdb.PSubscribe(ctx, channelPrefix+"*")
-	defer ps.Close()
+	defer func() { _ = ps.Close() }()
 	msgs := ps.Channel()
 	for {
 		select {

@@ -12,7 +12,11 @@ const m = (code: string) => `/meetings/${code}`;
 
 export const api = {
   createMeeting: (input: CreateMeetingInput) =>
-    request<{ meeting: MeetingInfo; participant: Participant }>('POST', '/meetings', input),
+    request<{ meeting: MeetingInfo; participant: Pick<Participant, 'id' | 'role' | 'status'> }>(
+      'POST',
+      '/meetings',
+      input,
+    ),
   getMeeting: (code: string) => request<MeetingInfo>('GET', m(code)),
   join: (code: string, displayName: string, password?: string) =>
     request<{ participant: Participant }>('POST', `${m(code)}/join`, { displayName, password }),
@@ -34,7 +38,7 @@ export const api = {
 
   host: {
     waiting: (code: string) =>
-      request<{ participants: Participant[] }>('GET', `${m(code)}/participants?status=waiting`),
+      request<{ participants: Participant[] }>('GET', `${m(code)}/participants`),
     admit: (code: string, id: string) =>
       request<void>('POST', `${m(code)}/participants/${id}/admit`),
     deny: (code: string, id: string) => request<void>('POST', `${m(code)}/participants/${id}/deny`),

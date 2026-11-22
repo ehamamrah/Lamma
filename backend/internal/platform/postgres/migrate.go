@@ -22,7 +22,7 @@ func Migrate(files fs.FS, databaseURL, direction string) error {
 	if err != nil {
 		return fmt.Errorf("init migrate: %w", err)
 	}
-	defer m.Close()
+	defer func() { _, _ = m.Close() }()
 	err = runDirection(m, direction)
 	if errors.Is(err, migrate.ErrNoChange) {
 		return nil

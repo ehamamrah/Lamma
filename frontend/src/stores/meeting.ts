@@ -22,6 +22,18 @@ export interface DevicePrefs {
   videoDeviceId?: string;
 }
 
+export interface MeetingData {
+  stage: Stage;
+  meeting: MeetingInfo | null;
+  me: Participant | null;
+  grant: TokenGrant | null;
+  devices: DevicePrefs;
+  error: string | null;
+}
+
+/** A partial update of the meeting state. */
+export type MeetingPatch = Partial<MeetingData>;
+
 interface MeetingState {
   stage: Stage;
   meeting: MeetingInfo | null;
@@ -29,7 +41,7 @@ interface MeetingState {
   grant: TokenGrant | null;
   devices: DevicePrefs;
   error: string | null;
-  set: (patch: Partial<Omit<MeetingState, 'set' | 'reset'>>) => void;
+  set: (patch: MeetingPatch) => void;
   reset: () => void;
 }
 

@@ -152,7 +152,7 @@ func loadLimits(r *reader) Limits {
 
 func loadBreaker(r *reader) Breaker {
 	return Breaker{
-		FailureThreshold: uint32(max(1, r.integer("BREAKER_FAILURE_THRESHOLD", 5))),
+		FailureThreshold: uint32(min(1000, max(1, r.integer("BREAKER_FAILURE_THRESHOLD", 5)))), //nolint:gosec // clamped
 		OpenTimeout:      r.duration("BREAKER_OPEN_TIMEOUT", 30*time.Second),
 	}
 }

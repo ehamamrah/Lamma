@@ -33,12 +33,12 @@ func openInfra(ctx context.Context, cfg config.Config) (*infra, error) {
 	}
 	in.tracing = tracing
 	if in.pool, err = postgres.Connect(ctx, cfg.DatabaseURL, cfg.DBMaxConns); err != nil {
-		return nil, errors.Join(err, in.Close())
+		return nil, errors.Join(err, in.Close()) //nolint:contextcheck // shutdown runs after the request context is gone
 	}
 	in.metrics.Registry.MustRegister(postgres.NewPoolCollector(in.pool))
 	in.redis, err = redisx.Connect(cfg.RedisURL, in.metrics.RedisDuration, in.metrics.RedisErrors)
 	if err != nil {
-		return nil, errors.Join(err, in.Close())
+		return nil, errors.Join(err, in.Close()) //nolint:contextcheck // shutdown runs after the request context is gone
 	}
 	return in, nil
 }

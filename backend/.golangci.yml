@@ -1,0 +1,41 @@
+version: "2"
+run:
+  timeout: 5m
+  build-tags: [integration, e2e]
+linters:
+  default: standard
+  enable:
+    - funlen       # PLAN §5: no function over 15 statements
+    - gocognit
+    - nestif
+    - gosec
+    - bodyclose
+    - noctx
+    - contextcheck
+    - errorlint
+    - misspell
+    - revive
+  settings:
+    funlen:
+      lines: -1
+      statements: 15
+      ignore-comments: true
+    gocognit:
+      min-complexity: 15
+    nestif:
+      min-complexity: 4
+    revive:
+      rules:
+        - name: exported
+  exclusions:
+    generated: strict
+    rules:
+      # Tests are table-driven and intentionally linear; size limits apply to production code.
+      - path: (_test\.go|^e2e/|^integration/)
+        linters: [funlen, gocognit, gosec, noctx, errcheck, contextcheck, staticcheck]
+      # admission.wait: single select loop (accepted exception, docs/review-log.md BA4-12).
+      - path: internal/admission/http.go
+        text: "Function 'wait'"
+        linters: [funlen]
+formatters:
+  enable: [gofmt, goimports]

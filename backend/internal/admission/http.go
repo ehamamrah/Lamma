@@ -101,7 +101,7 @@ func newStream(w http.ResponseWriter) *stream {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	s := &stream{w: w, rc: http.NewResponseController(w)}
-	_ = s.rc.Flush() // deliver headers now, not at the first heartbeat
+	s.write("retry: 5000\n\n") // client reconnect delay; also flushes headers now
 	return s
 }
 

@@ -6,3 +6,6 @@ proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Request-ID $request_id;
 proxy_connect_timeout 3s;
+# The API sets its own stricter CSP/Referrer-Policy; avoid duplicates.
+proxy_hide_header Content-Security-Policy;
+proxy_hide_header Referrer-Policy;

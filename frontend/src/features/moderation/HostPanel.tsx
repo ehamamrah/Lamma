@@ -1,4 +1,6 @@
 import { Check, X } from 'lucide-react';
+import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { errorMessage } from '@/shared/api/client';
 import { api } from '@/shared/api/meetings';
 import { Alert } from '@/shared/ui/alert';
@@ -6,31 +8,35 @@ import { Button } from '@/shared/ui/button';
 import { Label } from '@/shared/ui/label';
 import { Switch } from '@/shared/ui/switch';
 import { useMeetingStore } from '@/stores/meeting';
+import { endMeeting } from '@/features/meeting/session';
 import { PanelHeader } from '@/features/room/PanelHeader';
-import { useWaitingList } from './useWaitingList';
+import type { WaitingList } from './useWaitingList';
+
+interface Props {
+  code: string;
+  waiting: WaitingList;
+  onClose: () => void;
+}
 
 /** Host controls. Rendering is a convenience; every action is authorized by the API. */
-export function HostPanel({ code, onClose }: { code: string; onClose: () => void }) {
-  const { meeting, error, set } = useMeetingStore();
-  const { waiting, refresh } = useWaitingList(code);
+export function HostPanel({ code, waiting: { waiting, refresh }, onClose }: Props) {
+  const { meeting, set } = useMeetingStore(useShallow((s) => ({ meeting: s.meeting, set: s.set })));
+  const [error, setError] = useState<string | null>(null);
   const run = (action: Promise<unknown>) =>
-    action.then(refresh, (err: unknown) => set({ error: errorMessage(err) }));
+    action.then(refresh, (err: unknown) => setError(errorMessage(err)));
 
   async function updateSettings(patch: { locked?: boolean; waitingRoom?: boolean }) {
     try {
       const s = await api.host.settings(code, patch);
-      if (meeting) set({ meeting: { ...meeting, ...s }, error: null });
+      if (meeting) set({ meeting: { ...meeting, ...s } });
+      setError(null);
     } catch (err) {
-      set({ error: errorMessage(err) });
+      setError(errorMessage(err));
     }
   }
 
-  async function endMeeting() {
-    if (!confirm('End the meeting for everyone?')) return;
-    await api.host.end(code).then(
-      () => set({ grant: null, stage: 'ended' }),
-      (err: unknown) => set({ error: errorMessage(err) }),
-    );
+  async function onEnd() {
+    if (confirm('End the meeting for everyone?')) setError(await endMeeting(code));
   }
 
   return (
@@ -84,7 +90,7 @@ export function HostPanel({ code, onClose }: { code: string; onClose: () => void
             </div>
           ))}
         </section>
-        <Button variant="destructive" className="mt-auto" onClick={() => void endMeeting()}>
+        <Button variant="destructive" className="mt-auto" onClick={() => void onEnd()}>
           End meeting for all
         </Button>
       </div>

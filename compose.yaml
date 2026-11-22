@@ -36,7 +36,7 @@ x-api-env: &api-env
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
     <<: *hardening
     cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
     read_only: true
@@ -57,7 +57,7 @@ services:
     networks: [lamma]
 
   redis:
-    image: redis:8-alpine
+    image: redis:8-alpine@sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3
     <<: *hardening
     cap_add: ["SETGID", "SETUID"]
     read_only: true
@@ -90,7 +90,7 @@ services:
     networks: [lamma]
 
   livekit:
-    image: livekit/livekit-server:v1.13.11
+    image: livekit/livekit-server:v1.13.11@sha256:25cd902de7cacbd5f1f779f6a6ac1eae20ba8f56b0935934ce6b0ab80d1e3d20
     <<: *hardening
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-lammadevkey}: ${LIVEKIT_API_SECRET:-lamma-dev-only-livekit-secret-0123456789}"

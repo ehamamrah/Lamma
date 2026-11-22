@@ -6,7 +6,7 @@ import { PreJoin } from '@/features/prejoin/PreJoin';
 import { MeetingRoom } from '@/features/room/MeetingRoom';
 import { WaitingRoom } from '@/features/waiting/WaitingRoom';
 import { NotFoundPage } from './NotFoundPage';
-import { loadSession } from './session';
+import { closeSession, loadSession } from './session';
 import { StatusScreen } from './StatusScreen';
 
 export function MeetingPage() {
@@ -21,6 +21,7 @@ function MeetingFlow({ code }: { code: string }) {
   const stage = useMeetingStore((s) => s.stage);
   useEffect(() => {
     void loadSession(code);
+    return closeSession;
   }, [code]);
 
   switch (stage) {

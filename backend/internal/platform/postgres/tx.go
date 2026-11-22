@@ -40,14 +40,14 @@ func (m *TxManager) InTx(ctx context.Context, fn func(ctx context.Context) error
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer func() {
+	defer func() { //nolint:contextcheck // rollback uses a fresh context on purpose
 		if p := recover(); p != nil {
 			_ = rollback(tx)
 			panic(p)
 		}
 	}()
 	if err := fn(context.WithValue(ctx, txKey{}, tx)); err != nil {
-		return errors.Join(err, rollback(tx))
+		return errors.Join(err, rollback(tx)) //nolint:contextcheck // rollback uses a fresh context on purpose
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)

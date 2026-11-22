@@ -12,9 +12,10 @@ interface Props {
   code: string;
   panel: Panel;
   onPanel: (p: Panel) => void;
+  waitingCount?: number;
 }
 
-export function ControlBar({ code, panel, onPanel }: Props) {
+export function ControlBar({ code, panel, onPanel, waitingCount = 0 }: Props) {
   const isHost = useMeetingStore((s) => s.me?.role === 'host'); // display only
   const toggle = (p: Exclude<Panel, null>) => onPanel(panel === p ? null : p);
 
@@ -39,12 +40,22 @@ export function ControlBar({ code, panel, onPanel }: Props) {
         icon={<Users />}
       />
       {isHost && (
-        <PanelButton
-          label="Host controls"
-          active={panel === 'host'}
-          onClick={() => toggle('host')}
-          icon={<Shield />}
-        />
+        <span className="relative">
+          <PanelButton
+            label="Host controls"
+            active={panel === 'host'}
+            onClick={() => toggle('host')}
+            icon={<Shield />}
+          />
+          {waitingCount > 0 && (
+            <span
+              className="pointer-events-none absolute -right-1 -top-1 rounded-full bg-destructive px-1.5 text-xs text-destructive-foreground"
+              aria-label={`${waitingCount} waiting`}
+            >
+              {waitingCount}
+            </span>
+          )}
+        </span>
       )}
       <CopyLinkButton code={code} />
       <Button variant="destructive" onClick={() => void leaveMeeting(code)}>

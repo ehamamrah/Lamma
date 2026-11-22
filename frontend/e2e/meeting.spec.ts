@@ -1,11 +1,5 @@
-import { expect, type Browser, type Page, test } from '@playwright/test';
-
-async function newPage(browser: Browser): Promise<Page> {
-  const ctx = await browser.newContext({
-    permissions: ['camera', 'microphone', 'clipboard-read', 'clipboard-write'],
-  });
-  return ctx.newPage();
-}
+import { expect, type Page, test } from '@playwright/test';
+import { newPage } from './helpers';
 
 /** Number of <video> elements actually rendering remote frames. */
 async function playingRemoteVideos(page: Page): Promise<number> {
@@ -72,10 +66,26 @@ test('waiting room: host admits a guest', async ({ browser }) => {
   await host.getByRole('button', { name: 'Host controls' }).click();
 
   const guest = await newPage(browser);
+  await guest.addInitScript(() => {
+    const md = navigator.mediaDevices;
+    const original = md.getUserMedia.bind(md);
+    (window as unknown as { gumCalls: number }).gumCalls = 0;
+    md.getUserMedia = (c) => {
+      (window as unknown as { gumCalls: number }).gumCalls++;
+      return original(c);
+    };
+  });
   await guest.goto(host.url());
   await guest.getByLabel('Your name').fill('Waiting Wes');
   await guest.getByRole('button', { name: 'Ask to join' }).click();
   await expect(guest.getByText('Waiting for the host')).toBeVisible();
+
+  // Regression: the device preview must not re-acquire the camera in a loop
+  // (which made the waiting room flicker).
+  const calls = () => guest.evaluate(() => (window as unknown as { gumCalls: number }).gumCalls);
+  const settled = await calls();
+  await guest.waitForTimeout(2_000);
+  expect(await calls()).toBe(settled);
 
   await host.getByRole('button', { name: 'Admit Waiting Wes' }).click();
   await expect(guest.getByRole('button', { name: /leave/i })).toBeVisible();

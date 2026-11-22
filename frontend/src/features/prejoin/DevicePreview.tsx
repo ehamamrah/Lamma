@@ -1,7 +1,7 @@
 import { useMediaDeviceSelect, usePreviewTracks } from '@livekit/components-react';
 import { Track, type LocalVideoTrack } from 'livekit-client';
 import { Mic, MicOff, Video, VideoOff } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/shared/ui/button';
 import { useMeetingStore } from '@/stores/meeting';
 
@@ -17,7 +17,10 @@ export function DevicePreview() {
     }),
     [devices],
   );
-  const tracks = usePreviewTracks(options, (e) => setDeviceError(e.message));
+  // The error callback must be stable: usePreviewTracks re-creates the tracks
+  // whenever it changes, which would loop (and flicker) on every render.
+  const onDeviceError = useCallback((e: Error) => setDeviceError(e.message), []);
+  const tracks = usePreviewTracks(options, onDeviceError);
   const video = tracks?.find((t) => t.kind === Track.Kind.Video) as LocalVideoTrack | undefined;
 
   return (

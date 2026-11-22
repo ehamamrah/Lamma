@@ -15,16 +15,15 @@ import (
 
 // Meeting is the meeting aggregate. PasswordHash never leaves the server.
 type Meeting struct {
-	ID              uuid.UUID
-	Code            string
-	Title           string
-	PasswordHash    string
-	WaitingRoom     bool
-	Locked          bool
-	MaxParticipants int
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
-	RoomCreated     bool
+	ID           uuid.UUID
+	Code         string
+	Title        string
+	PasswordHash string
+	WaitingRoom  bool
+	Locked       bool
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	RoomCreated  bool
 }
 
 // RequiresPassword reports whether joining needs a password.

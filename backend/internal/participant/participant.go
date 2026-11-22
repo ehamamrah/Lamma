@@ -40,9 +40,6 @@ type Intruder struct {
 
 // Limits on abuse of the waiting room and seats (PLAN.md §6, §9).
 const (
-	// admittedFactor caps admitted guest rows per meeting at a multiple of
-	// its capacity, bounding row growth from scripted joins.
-	admittedFactor             = 4
 	maxWaitingPerOrigin        = 3
 	maxWaitingPerMeeting       = 50
 	maxUnconnectedPerOrigin    = 3
@@ -57,7 +54,6 @@ var (
 	errDenied           = apperr.New(apperr.KindForbidden, "denied", "The host declined your request to join.")
 	errPasswordRequired = apperr.New(apperr.KindUnauthorized, "password_required", "This meeting requires a password.")
 	errInvalidPassword  = apperr.New(apperr.KindUnauthorized, "invalid_password", "Incorrect meeting password.")
-	errFull             = apperr.New(apperr.KindConflict, "meeting_full", "This meeting is full.")
 	errWaitingFull      = apperr.New(apperr.KindConflict, "waiting_room_full", "The waiting room is full. Try again later.")
 	errTooManyPending   = apperr.New(apperr.KindRateLimited, "too_many_pending", "Too many unconnected joins from your network.").WithRetry(time.Minute)
 	errNotWaiting       = apperr.New(apperr.KindConflict, "not_waiting", "That participant is not in the waiting room.")

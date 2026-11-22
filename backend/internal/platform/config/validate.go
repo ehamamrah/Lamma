@@ -28,9 +28,6 @@ func validateCommon(c Config) []error {
 	if c.Meeting.DefaultTTL > c.Meeting.MaxTTL {
 		errs = append(errs, fmt.Errorf("MEETING_DEFAULT_TTL: exceeds MEETING_MAX_TTL"))
 	}
-	if c.Meeting.MaxParticipants < 2 || c.Meeting.MaxParticipants > 500 {
-		errs = append(errs, fmt.Errorf("MEETING_MAX_PARTICIPANTS: must be 2..500"))
-	}
 	if c.LiveKit.TokenTTL < 30*time.Second || c.LiveKit.TokenTTL > 5*time.Minute {
 		errs = append(errs, fmt.Errorf("LIVEKIT_TOKEN_TTL: must be between 30s and 5m"))
 	}

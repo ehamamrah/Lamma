@@ -35,8 +35,8 @@ func TestSignerGrantsAreMinimal(t *testing.T) {
 		t.Fatal("token must join exactly its room")
 	case g.RoomAdmin || g.RoomCreate || g.RoomList || g.RoomRecord:
 		t.Fatal("participants must never get admin grants")
-	case g.GetCanPublishData():
-		t.Fatal("data publish must be denied (chat goes through the API)")
+	case !g.GetCanPublishData():
+		t.Fatal("data publish is needed for reactions and the whiteboard")
 	case g.GetCanUpdateOwnMetadata():
 		t.Fatal("participants must not change their own metadata (role display)")
 	case v.Identity() != "id-1":

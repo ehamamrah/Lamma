@@ -142,21 +142,20 @@ func (ns NullParticipantStatus) Value() (driver.Value, error) {
 }
 
 type Meeting struct {
-	ID              uuid.UUID
-	Code            string
-	Title           *string
-	PasswordHash    *string
-	WaitingRoom     bool
-	Locked          bool
-	Status          MeetingStatus
-	MaxParticipants int32
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
-	EndedAt         *time.Time
-	RoomCreatedAt   *time.Time
-	RoomClosedAt    *time.Time
-	ReconcileAfter  *time.Time
-	SweepAfter      *time.Time
+	ID             uuid.UUID
+	Code           string
+	Title          *string
+	PasswordHash   *string
+	WaitingRoom    bool
+	Locked         bool
+	Status         MeetingStatus
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	EndedAt        *time.Time
+	RoomCreatedAt  *time.Time
+	RoomClosedAt   *time.Time
+	ReconcileAfter *time.Time
+	SweepAfter     *time.Time
 }
 
 type ModerationEvent struct {

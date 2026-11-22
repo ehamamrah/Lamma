@@ -45,10 +45,9 @@ type LiveKit struct {
 
 // Meeting holds meeting lifecycle defaults.
 type Meeting struct {
-	DefaultTTL      time.Duration
-	MaxTTL          time.Duration
-	Retention       time.Duration
-	MaxParticipants int
+	DefaultTTL time.Duration
+	MaxTTL     time.Duration
+	Retention  time.Duration
 }
 
 // Limits holds every rate-limit policy (PLAN.md §10).
@@ -128,10 +127,9 @@ func loadLiveKit(r *reader) LiveKit {
 
 func loadMeeting(r *reader) Meeting {
 	return Meeting{
-		DefaultTTL:      r.duration("MEETING_DEFAULT_TTL", 24*time.Hour),
-		MaxTTL:          r.duration("MEETING_MAX_TTL", 168*time.Hour),
-		Retention:       r.duration("MEETING_RETENTION", 168*time.Hour),
-		MaxParticipants: r.integer("MEETING_MAX_PARTICIPANTS", 50),
+		DefaultTTL: r.duration("MEETING_DEFAULT_TTL", 24*time.Hour),
+		MaxTTL:     r.duration("MEETING_MAX_TTL", 168*time.Hour),
+		Retention:  r.duration("MEETING_RETENTION", 168*time.Hour),
 	}
 }
 

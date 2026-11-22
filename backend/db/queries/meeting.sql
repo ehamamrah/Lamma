@@ -1,7 +1,7 @@
 -- name: InsertMeeting :execrows
 -- ON CONFLICT keeps the surrounding transaction usable on a code collision.
-INSERT INTO meetings (id, code, title, password_hash, waiting_room, max_participants, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO meetings (id, code, title, password_hash, waiting_room, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (code) DO NOTHING;
 
 -- name: GetOpenMeetingByCode :one

@@ -142,7 +142,7 @@ func (q *Queries) ExpireMeetings(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 const getOpenMeetingByCode = `-- name: GetOpenMeetingByCode :one
-SELECT id, code, title, password_hash, waiting_room, locked, status, max_participants, created_at, expires_at, ended_at, room_created_at, room_closed_at, reconcile_after, sweep_after FROM meetings
+SELECT id, code, title, password_hash, waiting_room, locked, status, created_at, expires_at, ended_at, room_created_at, room_closed_at, reconcile_after, sweep_after FROM meetings
 WHERE code = $1 AND status = 'active' AND expires_at > now()
 `
 
@@ -158,7 +158,6 @@ func (q *Queries) GetOpenMeetingByCode(ctx context.Context, code string) (Meetin
 		&i.WaitingRoom,
 		&i.Locked,
 		&i.Status,
-		&i.MaxParticipants,
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.EndedAt,
@@ -171,7 +170,7 @@ func (q *Queries) GetOpenMeetingByCode(ctx context.Context, code string) (Meetin
 }
 
 const getOpenMeetingByID = `-- name: GetOpenMeetingByID :one
-SELECT id, code, title, password_hash, waiting_room, locked, status, max_participants, created_at, expires_at, ended_at, room_created_at, room_closed_at, reconcile_after, sweep_after FROM meetings
+SELECT id, code, title, password_hash, waiting_room, locked, status, created_at, expires_at, ended_at, room_created_at, room_closed_at, reconcile_after, sweep_after FROM meetings
 WHERE id = $1 AND status = 'active' AND expires_at > now()
 `
 
@@ -186,7 +185,6 @@ func (q *Queries) GetOpenMeetingByID(ctx context.Context, id uuid.UUID) (Meeting
 		&i.WaitingRoom,
 		&i.Locked,
 		&i.Status,
-		&i.MaxParticipants,
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.EndedAt,
@@ -199,19 +197,18 @@ func (q *Queries) GetOpenMeetingByID(ctx context.Context, id uuid.UUID) (Meeting
 }
 
 const insertMeeting = `-- name: InsertMeeting :execrows
-INSERT INTO meetings (id, code, title, password_hash, waiting_room, max_participants, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO meetings (id, code, title, password_hash, waiting_room, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (code) DO NOTHING
 `
 
 type InsertMeetingParams struct {
-	ID              uuid.UUID
-	Code            string
-	Title           *string
-	PasswordHash    *string
-	WaitingRoom     bool
-	MaxParticipants int32
-	ExpiresAt       time.Time
+	ID           uuid.UUID
+	Code         string
+	Title        *string
+	PasswordHash *string
+	WaitingRoom  bool
+	ExpiresAt    time.Time
 }
 
 // ON CONFLICT keeps the surrounding transaction usable on a code collision.
@@ -222,7 +219,6 @@ func (q *Queries) InsertMeeting(ctx context.Context, arg InsertMeetingParams) (i
 		arg.Title,
 		arg.PasswordHash,
 		arg.WaitingRoom,
-		arg.MaxParticipants,
 		arg.ExpiresAt,
 	)
 	if err != nil {
@@ -319,7 +315,7 @@ UPDATE meetings
 SET locked       = coalesce($2, locked),
     waiting_room = coalesce($3, waiting_room)
 WHERE id = $1 AND status = 'active' AND expires_at > now()
-RETURNING id, code, title, password_hash, waiting_room, locked, status, max_participants, created_at, expires_at, ended_at, room_created_at, room_closed_at, reconcile_after, sweep_after
+RETURNING id, code, title, password_hash, waiting_room, locked, status, created_at, expires_at, ended_at, room_created_at, room_closed_at, reconcile_after, sweep_after
 `
 
 type UpdateMeetingSettingsParams struct {
@@ -339,7 +335,6 @@ func (q *Queries) UpdateMeetingSettings(ctx context.Context, arg UpdateMeetingSe
 		&i.WaitingRoom,
 		&i.Locked,
 		&i.Status,
-		&i.MaxParticipants,
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.EndedAt,

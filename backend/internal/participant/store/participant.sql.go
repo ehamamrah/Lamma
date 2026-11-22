@@ -93,21 +93,6 @@ func (q *Queries) ClaimLease(ctx context.Context, arg ClaimLeaseParams) (ClaimLe
 	return i, err
 }
 
-const countAdmittedGuests = `-- name: CountAdmittedGuests :one
-SELECT count(*) FROM participants
-WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted'
-  AND (in_room OR lease_until > now() OR status_at > now() - interval '30 minutes')
-`
-
-// Only recently active rows count, so idle scripted joins age out instead of
-// permanently filling the cap (review SP4 re-verification).
-func (q *Queries) CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countAdmittedGuests, meetingID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countFreshWaiting = `-- name: CountFreshWaiting :one
 SELECT count(*) FILTER (WHERE origin_hash = $2) AS by_origin,
        count(*) AS total
@@ -143,32 +128,26 @@ func (q *Queries) CountInRoom(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-const countSeats = `-- name: CountSeats :one
-SELECT count(*) FILTER (WHERE TRUE) AS total,
-       count(*) FILTER (WHERE origin_hash = $2 AND NOT in_room) AS unconnected_by_origin
-FROM participants
-WHERE meeting_id = $1 AND id <> $3 AND role = 'guest'
-  AND status = 'admitted' AND (in_room OR lease_until > now())
+const countUnconnectedByOrigin = `-- name: CountUnconnectedByOrigin :one
+SELECT count(*) FROM participants
+WHERE meeting_id = $1 AND id <> $2 AND role = 'guest'
+  AND status = 'admitted' AND NOT in_room AND lease_until > now()
+  AND origin_hash = $3
 `
 
-type CountSeatsParams struct {
+type CountUnconnectedByOriginParams struct {
 	MeetingID  uuid.UUID
-	OriginHash []byte
 	ExcludeID  uuid.UUID
+	OriginHash []byte
 }
 
-type CountSeatsRow struct {
-	Total               int64
-	UnconnectedByOrigin int64
-}
-
-// A seat is held by admitted guests that are connected or hold a live lease.
-// Hosts are exempt (PLAN.md §6 Seats).
-func (q *Queries) CountSeats(ctx context.Context, arg CountSeatsParams) (CountSeatsRow, error) {
-	row := q.db.QueryRow(ctx, countSeats, arg.MeetingID, arg.OriginHash, arg.ExcludeID)
-	var i CountSeatsRow
-	err := row.Scan(&i.Total, &i.UnconnectedByOrigin)
-	return i, err
+// Admitted guests from one network holding a live lease without having
+// connected yet. Hosts are exempt (PLAN.md §6 Seats).
+func (q *Queries) CountUnconnectedByOrigin(ctx context.Context, arg CountUnconnectedByOriginParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnconnectedByOrigin, arg.MeetingID, arg.ExcludeID, arg.OriginHash)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const denyAllWaiting = `-- name: DenyAllWaiting :many
@@ -208,7 +187,7 @@ type FilterAdmittedParams struct {
 }
 
 // Of the identities LiveKit reports as connected, which are admitted? Bounded
-// by the room size, unlike listing every admitted row.
+// by who is actually connected, unlike listing every admitted row.
 func (q *Queries) FilterAdmitted(ctx context.Context, arg FilterAdmittedParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, filterAdmitted, arg.MeetingID, arg.Candidates)
 	if err != nil {
@@ -411,29 +390,23 @@ func (q *Queries) ListInRoomIDs(ctx context.Context, meetingID uuid.UUID) ([]uui
 }
 
 const lockMeeting = `-- name: LockMeeting :one
-SELECT id, max_participants, locked, waiting_room
+SELECT id, locked, waiting_room
 FROM meetings
 WHERE id = $1 AND status = 'active' AND expires_at > now()
 FOR UPDATE
 `
 
 type LockMeetingRow struct {
-	ID              uuid.UUID
-	MaxParticipants int32
-	Locked          bool
-	WaitingRoom     bool
+	ID          uuid.UUID
+	Locked      bool
+	WaitingRoom bool
 }
 
 // Serialises joins / seat claims per meeting (PLAN.md §6 Transactions).
 func (q *Queries) LockMeeting(ctx context.Context, id uuid.UUID) (LockMeetingRow, error) {
 	row := q.db.QueryRow(ctx, lockMeeting, id)
 	var i LockMeetingRow
-	err := row.Scan(
-		&i.ID,
-		&i.MaxParticipants,
-		&i.Locked,
-		&i.WaitingRoom,
-	)
+	err := row.Scan(&i.ID, &i.Locked, &i.WaitingRoom)
 	return i, err
 }
 

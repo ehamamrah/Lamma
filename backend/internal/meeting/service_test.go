@@ -55,7 +55,7 @@ func (fakeHasher) Hash(_ context.Context, pw string) (string, error) { return "h
 
 func newService(store *fakeStore, hosts *fakeHosts) *Service {
 	return NewService(store, hosts, inlineTx{}, fakeHasher{}, Config{
-		DefaultTTL: 24 * time.Hour, MaxTTL: 48 * time.Hour, MaxParticipants: 50,
+		DefaultTTL: 24 * time.Hour, MaxTTL: 48 * time.Hour,
 	})
 }
 

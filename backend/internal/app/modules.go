@@ -75,7 +75,7 @@ func (c *container) buildServices() {
 		Passwords: hasher, Tx: c.tx, PasswordLimit: participant.RateCheck(c.limiter.For(c.policies().password)),
 	})
 	c.meetings = meeting.NewService(c.meetStore, c.parts, c.tx, hasher, meeting.Config{
-		DefaultTTL: c.cfg.Meeting.DefaultTTL, MaxTTL: c.cfg.Meeting.MaxTTL, MaxParticipants: c.cfg.Meeting.MaxParticipants,
+		DefaultTTL: c.cfg.Meeting.DefaultTTL, MaxTTL: c.cfg.Meeting.MaxTTL,
 	})
 	lookup.svc = c.meetings
 	c.seats = participant.NewSeats(participant.SeatDeps{

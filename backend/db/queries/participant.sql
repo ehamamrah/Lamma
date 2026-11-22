@@ -1,6 +1,6 @@
 -- name: LockMeeting :one
 -- Serialises joins / seat claims per meeting (PLAN.md §6 Transactions).
-SELECT id, max_participants, locked, waiting_room
+SELECT id, locked, waiting_room
 FROM meetings
 WHERE id = $1 AND status = 'active' AND expires_at > now()
 FOR UPDATE;
@@ -18,13 +18,6 @@ SELECT EXISTS (SELECT 1 FROM participants WHERE id = $1 AND meeting_id = $2) AS 
 
 -- name: GetHostID :one
 SELECT id FROM participants WHERE meeting_id = $1 AND role = 'host' LIMIT 1;
-
--- name: CountAdmittedGuests :one
--- Only recently active rows count, so idle scripted joins age out instead of
--- permanently filling the cap (review SP4 re-verification).
-SELECT count(*) FROM participants
-WHERE meeting_id = $1 AND role = 'guest' AND status = 'admitted'
-  AND (in_room OR lease_until > now() OR status_at > now() - interval '30 minutes');
 
 -- name: RemoveGuest :one
 -- Single statement: guarded on role and status, returns the previous status.
@@ -60,14 +53,13 @@ UPDATE participants SET status = 'denied', status_at = now()
 WHERE meeting_id = $1 AND status = 'waiting'
 RETURNING id;
 
--- name: CountSeats :one
--- A seat is held by admitted guests that are connected or hold a live lease.
--- Hosts are exempt (PLAN.md §6 Seats).
-SELECT count(*) FILTER (WHERE TRUE) AS total,
-       count(*) FILTER (WHERE origin_hash = sqlc.arg(origin_hash) AND NOT in_room) AS unconnected_by_origin
-FROM participants
+-- name: CountUnconnectedByOrigin :one
+-- Admitted guests from one network holding a live lease without having
+-- connected yet. Hosts are exempt (PLAN.md §6 Seats).
+SELECT count(*) FROM participants
 WHERE meeting_id = $1 AND id <> sqlc.arg(exclude_id) AND role = 'guest'
-  AND status = 'admitted' AND (in_room OR lease_until > now());
+  AND status = 'admitted' AND NOT in_room AND lease_until > now()
+  AND origin_hash = sqlc.arg(origin_hash);
 
 -- name: ClaimLease :one
 -- lease_count counts leases taken without connecting inside a sliding window:
@@ -122,7 +114,7 @@ RETURNING id, meeting_id;
 
 -- name: FilterAdmitted :many
 -- Of the identities LiveKit reports as connected, which are admitted? Bounded
--- by the room size, unlike listing every admitted row.
+-- by who is actually connected, unlike listing every admitted row.
 SELECT id FROM participants
 WHERE meeting_id = $1 AND status = 'admitted' AND id = ANY (sqlc.arg(candidates)::uuid[]);
 

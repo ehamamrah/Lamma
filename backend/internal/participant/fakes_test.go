@@ -15,14 +15,12 @@ import (
 
 // memStore is an in-memory Store for service tests.
 type memStore struct {
-	mu       sync.Mutex
-	lock     MeetingLock
-	byID     map[uuid.UUID]*Participant
-	leases   map[uuid.UUID]int
-	seats    int64
-	pending  int64
-	admitted int64
-	audits   []string
+	mu      sync.Mutex
+	lock    MeetingLock
+	byID    map[uuid.UUID]*Participant
+	leases  map[uuid.UUID]int
+	pending int64
+	audits  []string
 }
 
 func newMemStore(lock MeetingLock) *memStore {
@@ -30,11 +28,7 @@ func newMemStore(lock MeetingLock) *memStore {
 }
 
 func (m *memStore) LockMeeting(context.Context, uuid.UUID) (MeetingLock, error) {
-	lock := m.lock
-	if lock.MaxParticipants == 0 {
-		lock.MaxParticipants = 2
-	}
-	return lock, nil
+	return m.lock, nil
 }
 
 func (m *memStore) Insert(_ context.Context, n NewParticipant) (Participant, error) {
@@ -83,8 +77,8 @@ func (m *memStore) ListWaiting(context.Context, uuid.UUID) ([]Participant, error
 func (m *memStore) DenyAllWaiting(context.Context, uuid.UUID, uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }
-func (m *memStore) CountSeats(context.Context, uuid.UUID, uuid.UUID, []byte) (int64, int64, error) {
-	return m.seats, m.pending, nil
+func (m *memStore) CountUnconnected(context.Context, uuid.UUID, uuid.UUID, []byte) (int64, error) {
+	return m.pending, nil
 }
 func (m *memStore) ClaimLease(_ context.Context, id uuid.UUID, _ time.Duration) (int, bool, error) {
 	m.mu.Lock()
@@ -103,9 +97,6 @@ func (m *memStore) RemoveGuest(_ context.Context, _, _, target uuid.UUID) (acces
 	p.Status = access.StatusRemoved
 	m.audits = append(m.audits, "remove")
 	return prev, nil
-}
-func (m *memStore) CountAdmittedGuests(context.Context, uuid.UUID) (int64, error) {
-	return m.admitted, nil
 }
 func (m *memStore) HostID(context.Context, uuid.UUID) (uuid.UUID, error)  { return uuid.New(), nil }
 func (m *memStore) ReleaseLease(context.Context, uuid.UUID) error         { return nil }
@@ -136,7 +127,7 @@ func (f *fakeMeetings) MarkRoomCreated(context.Context, uuid.UUID) error {
 
 type fakeRooms struct{ err error }
 
-func (f fakeRooms) EnsureRoom(context.Context, string, int) error { return f.err }
+func (f fakeRooms) EnsureRoom(context.Context, string) error { return f.err }
 
 type fakeSigner struct{}
 

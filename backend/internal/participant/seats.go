@@ -17,7 +17,7 @@ import (
 type SeatStore interface {
 	LockMeeting(ctx context.Context, meetingID uuid.UUID) (MeetingLock, error)
 	Get(ctx context.Context, meetingID, id uuid.UUID) (Participant, error)
-	CountSeats(ctx context.Context, meetingID, exclude uuid.UUID, origin []byte) (total, unconnected int64, err error)
+	CountUnconnected(ctx context.Context, meetingID, exclude uuid.UUID, origin []byte) (int64, error)
 	ClaimLease(ctx context.Context, id uuid.UUID, ttl time.Duration) (leaseCount int, inRoom bool, err error)
 	AnyoneInRoom(ctx context.Context, meetingID uuid.UUID) (bool, error)
 }
@@ -30,7 +30,7 @@ type SeatMeetings interface {
 
 // Rooms creates LiveKit rooms (idempotent).
 type Rooms interface {
-	EnsureRoom(ctx context.Context, room string, maxParticipants int) error
+	EnsureRoom(ctx context.Context, room string) error
 }
 
 // Grant describes a LiveKit token to sign.
@@ -82,7 +82,7 @@ func (s *Seats) IssueToken(ctx context.Context, pr access.Principal) (TokenGrant
 	if err := s.ensureRoom(ctx, m); err != nil {
 		return TokenGrant{}, err
 	}
-	if err := s.claimSeat(ctx, pr, m.MaxParticipants); err != nil {
+	if err := s.claimSeat(ctx, pr); err != nil {
 		return TokenGrant{}, err
 	}
 	token, exp, err := s.d.Signer.Sign(Grant{
@@ -94,16 +94,17 @@ func (s *Seats) IssueToken(ctx context.Context, pr access.Principal) (TokenGrant
 	return TokenGrant{Token: token, ExpiresAt: exp}, nil
 }
 
-// claimSeat reserves the caller's seat. Hosts are exempt from capacity and
-// from the unconnected-lease cap so they can always rejoin to moderate.
-func (s *Seats) claimSeat(ctx context.Context, pr access.Principal, maxSeats int) error {
+// claimSeat reserves the caller's seat. Meetings have no participant cap; the
+// lease only bounds unconnected tokens per network. Hosts are exempt so they
+// can always rejoin to moderate.
+func (s *Seats) claimSeat(ctx context.Context, pr access.Principal) error {
 	return s.d.Tx.InTx(ctx, func(ctx context.Context) error {
 		if _, err := s.d.Store.LockMeeting(ctx, pr.MeetingID); err != nil {
 			return err
 		}
 		host := pr.Role == access.RoleHost
 		if !host {
-			if err := s.checkCapacity(ctx, pr, maxSeats); err != nil {
+			if err := s.checkPending(ctx, pr); err != nil {
 				return err
 			}
 		}
@@ -115,18 +116,16 @@ func (s *Seats) claimSeat(ctx context.Context, pr access.Principal, maxSeats int
 	})
 }
 
-// checkCapacity enforces max seats and the per-origin unconnected-seat cap.
-func (s *Seats) checkCapacity(ctx context.Context, pr access.Principal, maxSeats int) error {
+// checkPending enforces the per-origin cap on leased-but-unconnected seats,
+// so one network cannot mint tokens in bulk.
+func (s *Seats) checkPending(ctx context.Context, pr access.Principal) error {
 	cur, err := s.d.Store.Get(ctx, pr.MeetingID, pr.ParticipantID)
 	if err != nil {
 		return err
 	}
-	total, unconnected, err := s.d.Store.CountSeats(ctx, pr.MeetingID, pr.ParticipantID, cur.OriginHash)
+	unconnected, err := s.d.Store.CountUnconnected(ctx, pr.MeetingID, pr.ParticipantID, cur.OriginHash)
 	if err != nil {
 		return err
-	}
-	if total >= int64(maxSeats) {
-		return errFull
 	}
 	if !cur.InRoom && unconnected >= maxUnconnectedPerOrigin {
 		return errTooManyPending
@@ -146,7 +145,7 @@ func (s *Seats) ensureRoom(ctx context.Context, m meeting.Meeting) error {
 			return nil
 		}
 	}
-	if err := s.d.Rooms.EnsureRoom(ctx, m.ID.String(), m.MaxParticipants+1); err != nil {
+	if err := s.d.Rooms.EnsureRoom(ctx, m.ID.String()); err != nil {
 		slog.WarnContext(ctx, "ensure room failed", slog.Any("error", err))
 		return liveKitError(err)
 	}

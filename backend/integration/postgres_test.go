@@ -40,7 +40,7 @@ func pool(t *testing.T) *pgxpool.Pool {
 
 type noopRooms struct{}
 
-func (noopRooms) EnsureRoom(context.Context, string, int) error { return nil }
+func (noopRooms) EnsureRoom(context.Context, string) error { return nil }
 
 type signer struct{}
 
@@ -74,10 +74,10 @@ func newEnv(t *testing.T) env {
 	return env{tx: tx, meetings: ms, svc: msvc, parts: svc, seats: seats, store: ps}
 }
 
-func (e env) createMeeting(t *testing.T, maxParticipants int, waitingRoom bool) meeting.Meeting {
+func (e env) createMeeting(t *testing.T, waitingRoom bool) meeting.Meeting {
 	t.Helper()
 	code, _ := meeting.NewCode()
-	m := meeting.Meeting{ID: uuid.New(), Code: code, MaxParticipants: maxParticipants,
+	m := meeting.Meeting{ID: uuid.New(), Code: code,
 		WaitingRoom: waitingRoom, ExpiresAt: time.Now().Add(time.Hour)}
 	if err := e.meetings.Insert(context.Background(), m); err != nil {
 		t.Fatal(err)
@@ -97,16 +97,37 @@ func (e env) join(t *testing.T, m meeting.Meeting, origin byte) access.Principal
 		Role: access.RoleGuest, Status: res.Participant.Status, MeetingActive: true, ExpiresAt: m.ExpiresAt}
 }
 
-// TestConcurrentSeatClaimsNeverExceedCapacity is the core concurrency
-// guarantee of the seat model (PLAN.md §6): N parallel token requests for a
-// meeting with capacity C yield exactly C seats.
-func TestConcurrentSeatClaimsNeverExceedCapacity(t *testing.T) {
+// TestMeetingsHaveNoParticipantCap: every admitted guest gets a token, however
+// many join at once.
+func TestMeetingsHaveNoParticipantCap(t *testing.T) {
 	e := newEnv(t)
-	const capacity, guests = 3, 12
-	m := e.createMeeting(t, capacity, false)
-	principals := make([]access.Principal, guests)
+	const guests = 60
+	m := e.createMeeting(t, false)
+	if got := e.claimConcurrently(t, m, guests, func(i int) byte { return byte(i) }); got != guests {
+		t.Fatalf("granted %d of %d tokens", got, guests)
+	}
+}
+
+// TestConcurrentClaimsRespectOriginCap is the concurrency guarantee of the
+// lease model (PLAN.md §6): parallel token requests from one network never
+// exceed the unconnected-per-origin cap, because claims serialise on the
+// meeting row.
+func TestConcurrentClaimsRespectOriginCap(t *testing.T) {
+	e := newEnv(t)
+	const guests, perOrigin = 12, 3
+	m := e.createMeeting(t, false)
+	if got := e.claimConcurrently(t, m, guests, func(int) byte { return 9 }); got != perOrigin {
+		t.Fatalf("granted %d unconnected tokens to one origin, want %d", got, perOrigin)
+	}
+}
+
+// claimConcurrently joins n guests (origin chosen per index) and requests
+// their tokens in parallel, returning how many were granted.
+func (e env) claimConcurrently(t *testing.T, m meeting.Meeting, n int, origin func(int) byte) int32 {
+	t.Helper()
+	principals := make([]access.Principal, n)
 	for i := range principals {
-		principals[i] = e.join(t, m, byte(i)) // distinct origins: test capacity, not origin caps
+		principals[i] = e.join(t, m, origin(i))
 	}
 	var granted atomic.Int32
 	var wg sync.WaitGroup
@@ -118,14 +139,12 @@ func TestConcurrentSeatClaimsNeverExceedCapacity(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := granted.Load(); got != capacity {
-		t.Fatalf("granted %d seats with capacity %d", got, capacity)
-	}
+	return granted.Load()
 }
 
 func TestWaitingRoomCapPerOrigin(t *testing.T) {
 	e := newEnv(t)
-	m := e.createMeeting(t, 10, true)
+	m := e.createMeeting(t, true)
 	for range 3 {
 		e.join(t, m, 7)
 	}
@@ -138,7 +157,7 @@ func TestWaitingRoomCapPerOrigin(t *testing.T) {
 
 func TestTransitionIsGuardedAndAudited(t *testing.T) {
 	e := newEnv(t)
-	m := e.createMeeting(t, 10, true)
+	m := e.createMeeting(t, true)
 	host, err := e.parts.RegisterHost(context.Background(), m.ID, "Host", []byte{1})
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +170,7 @@ func TestTransitionIsGuardedAndAudited(t *testing.T) {
 	if err := e.parts.Admit(ctx, m.ID, host.ParticipantID, guest.ParticipantID); err == nil {
 		t.Fatal("admitting a non-waiting participant must fail")
 	}
-	other := e.createMeeting(t, 10, true)
+	other := e.createMeeting(t, true)
 	if err := e.parts.Admit(ctx, other.ID, host.ParticipantID, guest.ParticipantID); err == nil {
 		t.Fatal("cross-meeting target must not be found (IDOR)")
 	}
@@ -162,7 +181,7 @@ func TestReconcilerClaimsAreDisjoint(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	for range 20 {
-		m := e.createMeeting(t, 2, false)
+		m := e.createMeeting(t, false)
 		if _, err := e.meetings.End(ctx, m.ID, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +212,7 @@ func TestReconcilerClaimsAreDisjoint(t *testing.T) {
 
 func TestExpiredMeetingsAreInvisible(t *testing.T) {
 	e := newEnv(t)
-	m := e.createMeeting(t, 2, false)
+	m := e.createMeeting(t, false)
 	_, err := e.tx.Conn(context.Background()).Exec(context.Background(),
 		"UPDATE meetings SET expires_at = now() - interval '1 second' WHERE id = $1", m.ID)
 	if err != nil {

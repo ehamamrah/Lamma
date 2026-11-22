@@ -47,8 +47,9 @@ func NewClient(lk config.LiveKit, br config.Breaker, m *metrics.Metrics) *Client
 	}
 }
 
-// EnsureRoom creates the room if needed (CreateRoom is idempotent).
-func (c *Client) EnsureRoom(ctx context.Context, room string, maxParticipants int) error {
+// EnsureRoom creates the room if needed (CreateRoom is idempotent). Rooms have
+// no participant cap; the host controls entry with lock and the waiting room.
+func (c *Client) EnsureRoom(ctx context.Context, room string) error {
 	return c.retry(ctx, c.room, "create_room", func(ctx context.Context) error {
 		ctx, err := c.api.roomCreate(ctx)
 		if err != nil {
@@ -56,7 +57,6 @@ func (c *Client) EnsureRoom(ctx context.Context, room string, maxParticipants in
 		}
 		_, err = c.api.svc.CreateRoom(ctx, &livekit.CreateRoomRequest{
 			Name: room, EmptyTimeout: 300, DepartureTimeout: 20,
-			MaxParticipants: uint32(maxParticipants), //nolint:gosec // validated 2..501
 		})
 		return err
 	})

@@ -119,22 +119,9 @@ func (s *Service) entryStatus(ctx context.Context, meetingID uuid.UUID, origin [
 		return "", errLocked
 	}
 	if !lock.WaitingRoom {
-		return access.StatusAdmitted, s.checkAdmittedCap(ctx, meetingID, lock.MaxParticipants)
+		return access.StatusAdmitted, nil
 	}
 	return access.StatusWaiting, s.checkWaitingCaps(ctx, meetingID, origin)
-}
-
-// checkAdmittedCap bounds admitted guest rows (seats are enforced at token
-// time; this only stops unbounded row growth from scripted joins).
-func (s *Service) checkAdmittedCap(ctx context.Context, meetingID uuid.UUID, maxSeats int) error {
-	n, err := s.d.Store.CountAdmittedGuests(ctx, meetingID)
-	if err != nil {
-		return err
-	}
-	if n >= int64(admittedFactor*maxSeats) {
-		return errFull
-	}
-	return nil
 }
 
 func (s *Service) checkWaitingCaps(ctx context.Context, meetingID uuid.UUID, origin []byte) error {

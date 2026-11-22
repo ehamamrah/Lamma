@@ -27,11 +27,15 @@ func NewSigner(key, secret string, ttl time.Duration) *Signer {
 // Sign returns a JWT with the minimal grant set (PLAN.md §5). Host powers
 // live in the API, so host and guest grants are identical. Nil grant fields
 // default to "allowed" in LiveKit, so every permission is set explicitly.
+//
+// Data publishing carries reactions and the whiteboard peer to peer. Clients
+// trust those messages only from senders whose server-set role (metadata,
+// which participants cannot change) allows them; chat stays server-sent.
 func (s *Signer) Sign(g participant.Grant) (string, time.Time, error) {
 	grant := &auth.VideoGrant{RoomJoin: true, Room: g.Room}
 	grant.SetCanPublish(true)
 	grant.SetCanSubscribe(true)
-	grant.SetCanPublishData(false)
+	grant.SetCanPublishData(true)
 	grant.SetCanUpdateOwnMetadata(false)
 	grant.SetCanPublishSources([]livekit.TrackSource{
 		livekit.TrackSource_CAMERA, livekit.TrackSource_MICROPHONE,

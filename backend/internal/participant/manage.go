@@ -27,8 +27,8 @@ func (s *Service) RegisterHost(ctx context.Context, meetingID uuid.UUID, name st
 	return meeting.Host{ParticipantID: p.ID, Token: token}, nil
 }
 
-// Admit moves a waiting participant into the meeting. Capacity is enforced
-// later, when the participant requests a token.
+// Admit moves a waiting participant into the meeting. There is no participant
+// cap; the per-origin lease cap is checked when they request a token.
 func (s *Service) Admit(ctx context.Context, meetingID, actor, target uuid.UUID) error {
 	return s.decide(ctx, meetingID, actor, target, access.StatusAdmitted, "admit")
 }

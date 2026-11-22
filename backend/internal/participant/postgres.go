@@ -35,7 +35,7 @@ func (s *PGStore) LockMeeting(ctx context.Context, meetingID uuid.UUID) (Meeting
 	if err != nil {
 		return MeetingLock{}, fmt.Errorf("lock meeting: %w", err)
 	}
-	return MeetingLock{MaxParticipants: int(row.MaxParticipants), Locked: row.Locked, WaitingRoom: row.WaitingRoom}, nil
+	return MeetingLock{Locked: row.Locked, WaitingRoom: row.WaitingRoom}, nil
 }
 
 // Insert creates a participant with a fresh UUIDv7.
@@ -106,11 +106,6 @@ func (s *PGStore) HostID(ctx context.Context, meetingID uuid.UUID) (uuid.UUID, e
 	return s.q(ctx).GetHostID(ctx, meetingID)
 }
 
-// CountAdmittedGuests counts admitted guest rows of a meeting.
-func (s *PGStore) CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error) {
-	return s.q(ctx).CountAdmittedGuests(ctx, meetingID)
-}
-
 // CountWaiting counts fresh waiting entries for an origin and in total.
 func (s *PGStore) CountWaiting(ctx context.Context, meetingID uuid.UUID, origin []byte) (int64, int64, error) {
 	row, err := s.q(ctx).CountFreshWaiting(ctx, store.CountFreshWaitingParams{MeetingID: meetingID, OriginHash: origin})
@@ -144,10 +139,12 @@ func (s *PGStore) DenyAllWaiting(ctx context.Context, meetingID, actor uuid.UUID
 	return ids, err
 }
 
-// CountSeats counts occupied guest seats, excluding the caller.
-func (s *PGStore) CountSeats(ctx context.Context, meetingID, exclude uuid.UUID, origin []byte) (int64, int64, error) {
-	row, err := s.q(ctx).CountSeats(ctx, store.CountSeatsParams{MeetingID: meetingID, ExcludeID: exclude, OriginHash: origin})
-	return row.Total, row.UnconnectedByOrigin, err
+// CountUnconnected counts leased-but-unconnected guests from origin,
+// excluding the caller.
+func (s *PGStore) CountUnconnected(ctx context.Context, meetingID, exclude uuid.UUID, origin []byte) (int64, error) {
+	return s.q(ctx).CountUnconnectedByOrigin(ctx, store.CountUnconnectedByOriginParams{
+		MeetingID: meetingID, ExcludeID: exclude, OriginHash: origin,
+	})
 }
 
 // ClaimLease reserves the caller's seat for ttl.

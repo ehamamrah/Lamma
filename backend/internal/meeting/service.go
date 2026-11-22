@@ -54,9 +54,8 @@ type PasswordHasher interface {
 
 // Config bounds meeting creation.
 type Config struct {
-	DefaultTTL      time.Duration
-	MaxTTL          time.Duration
-	MaxParticipants int
+	DefaultTTL time.Duration
+	MaxTTL     time.Duration
 }
 
 // Service implements the meeting use cases.
@@ -125,7 +124,7 @@ func (s *Service) prepare(ctx context.Context, in CreateInput) (Meeting, string,
 	now := s.now()
 	return Meeting{
 		ID: uuid.New(), Title: title, PasswordHash: hash, WaitingRoom: in.WaitingRoom,
-		MaxParticipants: s.cfg.MaxParticipants, CreatedAt: now, ExpiresAt: now.Add(ttl),
+		CreatedAt: now, ExpiresAt: now.Add(ttl),
 	}, name, nil
 }
 

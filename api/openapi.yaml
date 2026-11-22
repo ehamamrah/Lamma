@@ -118,7 +118,7 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Code' }]
     post:
       tags: [participants]
-      summary: Claim a seat and get a short-lived LiveKit token (admitted only)
+      summary: Get a short-lived LiveKit token (admitted only; meetings have no participant cap)
       responses:
         '200':
           description: OK
@@ -127,7 +127,6 @@ paths:
               schema: { $ref: '#/components/schemas/TokenGrant' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
-        '409': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
 
@@ -401,4 +400,4 @@ components:
         status: { type: integer }
         code:
           type: string
-          examples: [not_found, meeting_locked, meeting_full, waiting_room_full, invalid_password, rate_limited, livekit_unavailable]
+          examples: [not_found, meeting_locked, waiting_room_full, invalid_password, rate_limited, livekit_unavailable]

@@ -41,7 +41,7 @@ func (h *harness) newSeats(rooms Rooms) *Seats {
 }
 
 func testMeeting() meeting.Meeting {
-	return meeting.Meeting{ID: uuid.New(), Code: "abcd-efgh-jkmn", MaxParticipants: 2, ExpiresAt: time.Now().Add(time.Hour)}
+	return meeting.Meeting{ID: uuid.New(), Code: "abcd-efgh-jkmn", ExpiresAt: time.Now().Add(time.Hour)}
 }
 
 func codeOf(err error) string {
@@ -178,20 +178,18 @@ func TestIssueToken(t *testing.T) {
 	tests := []struct {
 		name     string
 		role     access.Role
-		seats    int64
 		pending  int64
 		wantCode string
 	}{
-		{"guest with free seat", access.RoleGuest, 1, 0, ""},
-		{"guest when full", access.RoleGuest, 2, 0, "meeting_full"},
-		{"host exempt from full meeting", access.RoleHost, 2, 0, ""},
-		{"too many unconnected from origin", access.RoleGuest, 0, maxUnconnectedPerOrigin, "too_many_pending"},
+		{"guest", access.RoleGuest, 0, ""},
+		{"too many unconnected from origin", access.RoleGuest, maxUnconnectedPerOrigin, "too_many_pending"},
+		{"host exempt from origin cap", access.RoleHost, maxUnconnectedPerOrigin, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := testMeeting()
 			h := newHarness(m, MeetingLock{})
-			h.store.seats, h.store.pending = tt.seats, tt.pending
+			h.store.pending = tt.pending
 			p, _ := h.store.Insert(context.Background(), NewParticipant{MeetingID: m.ID, Role: tt.role, Status: access.StatusAdmitted})
 			grant, err := h.seats.IssueToken(context.Background(), principalFor(p, m))
 			if codeOf(err) != tt.wantCode || (err == nil && grant.Token == "") {
@@ -268,15 +266,5 @@ func TestHostNeverLockedOutByLeases(t *testing.T) {
 		if _, err := h.seats.IssueToken(context.Background(), principalFor(p, m)); err != nil {
 			t.Fatalf("host token %d rejected: %v", i, err)
 		}
-	}
-}
-
-func TestAdmittedGuestRowsAreCapped(t *testing.T) {
-	m := testMeeting()
-	h := newHarness(m, MeetingLock{MaxParticipants: 2})
-	h.store.admitted = admittedFactor * 2
-	_, err := h.svc.Join(context.Background(), JoinInput{Code: m.Code, DisplayName: "G"})
-	if codeOf(err) != "meeting_full" {
-		t.Fatalf("got %v, want meeting_full", err)
 	}
 }

@@ -31,7 +31,6 @@ func (s *PGStore) Insert(ctx context.Context, m Meeting) error {
 	n, err := s.q(ctx).InsertMeeting(ctx, store.InsertMeetingParams{
 		ID: m.ID, Code: m.Code, Title: nullable(m.Title), PasswordHash: nullable(m.PasswordHash),
 		WaitingRoom: m.WaitingRoom, ExpiresAt: m.ExpiresAt,
-		MaxParticipants: int32(m.MaxParticipants), //nolint:gosec // validated 2..500
 	})
 	if err != nil {
 		return fmt.Errorf("insert meeting: %w", err)
@@ -178,7 +177,7 @@ func toMeeting(row store.Meeting, err error) (Meeting, error) {
 	}
 	return Meeting{
 		ID: row.ID, Code: row.Code, Title: deref(row.Title), PasswordHash: deref(row.PasswordHash),
-		WaitingRoom: row.WaitingRoom, Locked: row.Locked, MaxParticipants: int(row.MaxParticipants),
+		WaitingRoom: row.WaitingRoom, Locked: row.Locked,
 		CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt, RoomCreated: row.RoomCreatedAt != nil,
 	}, nil
 }

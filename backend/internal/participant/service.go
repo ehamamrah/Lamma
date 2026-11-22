@@ -18,7 +18,6 @@ type Store interface {
 	Transition(ctx context.Context, t Transition) (Participant, error)
 	RemoveGuest(ctx context.Context, meetingID, actor, target uuid.UUID) (previous access.Status, err error)
 	CountWaiting(ctx context.Context, meetingID uuid.UUID, origin []byte) (byOrigin, total int64, err error)
-	CountAdmittedGuests(ctx context.Context, meetingID uuid.UUID) (int64, error)
 	ListWaiting(ctx context.Context, meetingID uuid.UUID) ([]Participant, error)
 	DenyAllWaiting(ctx context.Context, meetingID, actor uuid.UUID) ([]uuid.UUID, error)
 	HostID(ctx context.Context, meetingID uuid.UUID) (uuid.UUID, error)
@@ -28,9 +27,8 @@ type Store interface {
 
 // MeetingLock is the meeting row locked FOR UPDATE inside a transaction.
 type MeetingLock struct {
-	MaxParticipants int
-	Locked          bool
-	WaitingRoom     bool
+	Locked      bool
+	WaitingRoom bool
 }
 
 // NewParticipant is the data needed to insert a participant.

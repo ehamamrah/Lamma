@@ -18,27 +18,34 @@ const files = {
   wasmBinaryPath: `${BASE}/vision_wasm_internal.wasm`,
 };
 
+const RETRY_MS = [2_000, 8_000];
+
 /**
  * A model that loads the first time it is asked for. Until it is ready,
  * `get()` returns null and callers fall back (the library is code-split,
- * so people who never use effects never download it).
+ * so people who never use effects never download it). A failed load is
+ * retried twice, so one network hiccup doesn't leave effects off.
  */
 function lazyModel<T>(key: 'segmenter' | 'face', load: () => Promise<T>) {
   let instance: T | null = null;
+  let failures = 0;
+  const attempt = () => {
+    useVisionStatus.setState({ [key]: 'loading' });
+    load().then(
+      (m) => {
+        instance = m;
+        useVisionStatus.setState({ [key]: 'ready' });
+      },
+      (err: unknown) => {
+        console.warn(`camera effects: ${key} failed to load`, err);
+        const wait = RETRY_MS[failures++];
+        if (wait === undefined) useVisionStatus.setState({ [key]: 'error' });
+        else setTimeout(attempt, wait);
+      },
+    );
+  };
   return () => {
-    if (useVisionStatus.getState()[key] === 'idle') {
-      useVisionStatus.setState({ [key]: 'loading' });
-      load().then(
-        (m) => {
-          instance = m;
-          useVisionStatus.setState({ [key]: 'ready' });
-        },
-        (err: unknown) => {
-          console.warn(`camera effects: ${key} failed to load`, err);
-          useVisionStatus.setState({ [key]: 'error' });
-        },
-      );
-    }
+    if (useVisionStatus.getState()[key] === 'idle') attempt();
     return instance;
   };
 }

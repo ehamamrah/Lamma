@@ -34,6 +34,8 @@ async function startWithOcean(page: Page) {
   await page.getByRole('button', { name: 'New meeting' }).click();
   await page.getByRole('button', { name: 'Effects' }).click();
   await page.getByRole('button', { name: 'Ocean' }).click();
+  await expect(page.getByText('Loading effects…')).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.getByText('could not load')).toHaveCount(0);
   await expectOcean(preview(page));
 }
 

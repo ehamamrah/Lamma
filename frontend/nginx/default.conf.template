@@ -47,7 +47,7 @@ server {
     add_header Cache-Control "public, max-age=31536000, immutable" always;
     gzip off;
     gzip_static on;
-    limit_conn vision_conn 4;
+    limit_conn vision_conn 8;
     try_files $uri =404;
   }
 

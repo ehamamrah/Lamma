@@ -218,7 +218,7 @@ Re-verification: **PASS WITH CHANGES** — SP4-1 confirmed fixed live; one new M
 | BA8-4 | Med | Second `<video>` decoding the same track | Reuses the element LiveKit passes in |
 | BA8-5 / SP8-3 | Med | Both models at 30 fps on full-size frames on the main thread | Models alternate (15 fps each); segmentation input is 256 px wide |
 | BA8-6 | Med | Per-processor timestamps could go backwards on the shared models | One monotonic clock in `vision.ts` |
-| SP8-1/2 | Med | 14.7 MB wasm gzipped per request (CPU DoS); prod had no compression | Precompressed `.gz` at build, `gzip_static`, `gzip off` for `/vision/`, 4 connections per IP |
+| SP8-1/2 | Med | 14.7 MB wasm gzipped per request (CPU DoS); prod had no compression | Precompressed `.gz` at build, `gzip_static`, `gzip off` for `/vision/`, 8 connections per IP |
 | SP8-4 | Med | Blocked `localStorage` threw at import and broke prejoin and the room | Storage access wrapped; choices just aren't remembered |
 | SP8-5..8 | Low | `save`/`restore` not exception-safe; stale mask after device switch; shared default processor instance; decompression-bomb images | `try/finally`; mask reset on restart; a fresh processor per capture (getter); 40 MP cap and downscale to 1920 px |
 | SP8-9/10/11 | Low | Canvases kept after destroy; unversioned 7-day cache; no fetch timeout | Canvases freed; versioned folder, immutable cache; 120 s timeout |

@@ -12,7 +12,9 @@ FROM nginxinc/nginx-unprivileged:alpine@sha256:b5047b9b76845eac124358373c6852377
 # Templates are rendered (envsubst) into a tmpfs so the root FS stays read-only.
 ENV NGINX_ENVSUBST_OUTPUT_DIR=/tmp/nginx
 USER root
-RUN rm -f /etc/nginx/conf.d/default.conf \
+# Pinned base + current Alpine security fixes; curl is not needed at runtime.
+RUN apk upgrade --no-cache && apk del --no-cache curl \
+ && rm -f /etc/nginx/conf.d/default.conf \
  && printf '#!/bin/sh\nmkdir -p /tmp/nginx\n' > /docker-entrypoint.d/05-tmp-nginx.sh \
  && chmod +x /docker-entrypoint.d/05-tmp-nginx.sh
 COPY nginx/nginx.conf /etc/nginx/nginx.conf

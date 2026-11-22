@@ -72,6 +72,9 @@ func (l *Limiter) Allow(ctx context.Context, p Policy, key string) error {
 		return l.degraded(ctx, p, id, nil)
 	}
 	res, err := l.allowRedis(ctx, p, id)
+	if err != nil && ctx.Err() != nil {
+		return errUnavailable // the caller went away; not a Redis failure
+	}
 	if err != nil {
 		l.skipUntil.Store(time.Now().Add(skipWindow).UnixNano())
 		return l.degraded(ctx, p, id, err)

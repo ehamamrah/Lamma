@@ -8,7 +8,8 @@ info:
     using the token from `POST /meetings/{code}/token`.
 
     Auth: an HttpOnly session cookie (`lamma_sid`, or `__Secure-lamma_sid` in
-    production) scoped to `/api/v1/meetings/{code}`. Unsafe methods must come
+    production) scoped to `/api/v1/meetings/{code}`. Every session-scoped
+    route can also return 401 (no session) and 404 (meeting ended/expired). Unsafe methods must come
     from the app's origin (Origin / Sec-Fetch-Site). Errors use RFC 9457
     problem details with a stable `code`.
 servers:
@@ -83,6 +84,7 @@ paths:
                 displayName: { type: string, minLength: 1, maxLength: 40 }
                 password: { type: string }
       responses:
+        '400': { $ref: '#/components/responses/Problem' }
         '200': { $ref: '#/components/responses/ParticipantOK' }
         '202':
           description: Placed in the waiting room

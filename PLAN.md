@@ -743,20 +743,18 @@ CI always runs `go test -race ./...`.
 
 ## 17. CI/CD (`.github/workflows/ci.yml`)
 
-Jobs (actions pinned by commit SHA; Go/Node versions pinned):
+Actions are pinned by commit SHA and tool versions are pinned.
 
-1. **format** — `gofmt -l`, `prettier --check`.
-2. **go-lint** — `golangci-lint` with `funlen` (**statements: 15**), `gocognit`,
-   `nestif`, `errcheck`, `gosec`, `bodyclose`, `contextcheck`, `noctx`.
-3. **backend-test** — `go test -race -cover ./...`; `sqlc diff` (generated code drift).
-4. **backend-integration** — `go test -race -tags=integration ./...` (testcontainers).
-5. **frontend** — `eslint`, `tsc --noEmit`, `vitest run`.
-6. **docker** — `docker buildx build` for api and web (no push on PRs).
-7. **security** — `govulncheck`, `npm audit --audit-level=high`, Trivy (fs +
-   images), `gitleaks`.
-
-The 15-line rule is enforced mechanically by `funlen` (statements) and by the
-`backend-architect` agent for judgment cases.
+1. **backend-lint**: gofmt, golangci-lint v2.15 (`funlen` set to 15
+   statements, gocognit, nestif, gosec, …) and a check that the sqlc
+   output is up to date.
+2. **backend-test**: `go test -race -cover ./...`.
+3. **frontend**: Prettier, ESLint, `tsc`, Vitest.
+4. **stack**: `docker compose up --build`, then the Postgres integration
+   tests, the API e2e tests and the Playwright browser e2e (two
+   participants, fake media).
+5. **security**: govulncheck, npm audit, Trivy filesystem scan, Gitleaks.
+6. **images**: build both images and scan them with Trivy.
 
 ---
 
@@ -783,8 +781,8 @@ or recorded in `docs/review-log.md` with justification.
 | Share URL, others join by name | E2E two-browser |
 | Multi-party audio/video, screen share | E2E with fake devices + manual check |
 | Permissions enforced server-side | Unit authz matrix + integration IDOR tests |
-| Rate limiting across instances | Integration test with 2 limiter clients on one Redis |
-| Graceful handling of dependency failure | Breaker tests; LiveKit-down integration test |
+| Rate limiting across instances | `TestLimitIsSharedAcrossInstances` (two limiters, one Redis) |
+| Graceful handling of dependency failure | Breaker tests; LiveKit-down unit test (`participant/service_test.go`); degraded limiter tests |
 | Starts via Docker Compose | CI docker job + compose smoke test |
 | Automated tests pass | CI green |
 | No critical security issues | `security-performance-reviewer` sign-off |
@@ -795,7 +793,7 @@ or recorded in `docs/review-log.md` with justification.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `APP_ENV` | `development` | `production` enables HSTS and the production guards (§11) |
+| `APP_ENV` | `production` (binary), `development` (compose) | `production` enables HSTS and the production guards (§11) |
 | `COOKIE_SECURE` | `false` (dev) | Must be `true` in production |
 | `ARGON2_MAX_CONCURRENT` | `NumCPU` | Concurrent password hash/verify slots |
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | Used to build meeting URLs |

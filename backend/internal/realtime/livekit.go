@@ -55,7 +55,8 @@ func (c *Client) EnsureRoom(ctx context.Context, room string, maxParticipants in
 			return err
 		}
 		_, err = c.api.svc.CreateRoom(ctx, &livekit.CreateRoomRequest{
-			Name: room, MaxParticipants: uint32(maxParticipants), //nolint:gosec // validated 2..501 EmptyTimeout: 300, DepartureTimeout: 20,
+			Name: room, EmptyTimeout: 300, DepartureTimeout: 20,
+			MaxParticipants: uint32(maxParticipants), //nolint:gosec // validated 2..501
 		})
 		return err
 	})

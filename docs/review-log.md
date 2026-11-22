@@ -117,7 +117,7 @@ Phase 2: SP-U1 (verify LiveKit TURN cannot relay to internal addresses).
 | SP-7 | Low | Trailing JSON accepted | Second `Decode` must hit EOF |
 | SP-8 | Low | `Vary: Origin` conditional | Always set |
 | SP-9 | Low | Redis password in argv | Written to tmpfs config file |
-| SP-10 | Low | Data containers writable | `read_only` + tmpfs for Postgres/Redis. **Accepted:** images pinned by exact tag, digests deferred to release pipeline |
+| SP-10 | Low | Data containers writable; floating tags | `read_only` + tmpfs for Postgres/Redis; all base images later pinned by digest (Phase 5) |
 | SP-11 | Low | No idle-in-tx timeout | `idle_in_transaction_session_timeout=10s` |
 | SP-12 | Low | Raw IPs in Redis keys | Keys are HMAC'd |
 | Handoffs | — | Recover after headers; detached readiness probes; cancel ≠ Redis error | All fixed |
@@ -151,3 +151,34 @@ Phase 2: SP-U1 (verify LiveKit TURN cannot relay to internal addresses).
 | BA4-12 | Info | `admission.wait` ~20 lines | **Accepted exception**: single `select` loop; splitting harms clarity |
 
 Re-verification: **PASS WITH CHANGES** — SP4-1 confirmed fixed live; one new Medium (admitted cap counted idle rows forever) fixed by counting only recently active admitted guests (30 min). **Phase 4 gate: passed.**
+
+## Phase 5 — Frontend
+
+- backend-architect: **APPROVE WITH CHANGES**; security-performance-reviewer: **PASS WITH CHANGES** (no Critical/High).
+
+| # | Sev | Finding | Resolution |
+| --- | --- | --- | --- |
+| FA-1 | Med | Host never alerted to waiters with panel closed | Waiting list lifted to the room; badge on Host button |
+| FA-2/3 | Med | Stage writes scattered; no reset/stale guard | Transitions centralised in `session.ts`; reset on unmount; stale-response guard |
+| FA-4 | Med | No LiveKit `onError` | Mapped to the error stage |
+| FA-5 | Low | New capture objects each render re-ran room setup | Memoised (also fixed flaky e2e) |
+| FA-6..11 | Low | Shared error state, admission unmount race, type drift, selectors | Panel-local errors, active flag, contract-aligned types, `useShallow` |
+| FS-1 | Med | Refused SSE left guest stuck | Status recheck + jittered reopen; server sends `retry:` and Retry-After |
+| FS-2..8 | Low | Template dir, digests, CSP worker-src, duplicate API headers, debounce, prod parity | Private `/tmp/nginx`, digests pinned, `worker-src 'self'`, `proxy_hide_header`, 500ms debounce, prod `/assets` + `/metrics` |
+| Bug | — | Chat panel crashed in Chrome 159 (`scrollIntoView` returns a Promise from an effect) | Block-bodied effect; caught by the browser e2e |
+
+## Phase 6 — Final review
+
+- security-performance-reviewer: **FAIL** (1 High) → fixed.
+- backend-architect: **APPROVE WITH CHANGES** (no Critical/High).
+
+| # | Sev | Finding | Resolution |
+| --- | --- | --- | --- |
+| SP6-1 | **High** | Client hang-ups counted as Redis failures → anyone could force degraded mode (503 on create/password) | Cancelled callers short-circuit without touching the skip window; regression test |
+| SP6-2 | Low | `//nolint` comment swallowed room timeouts | Fixed; audit found the same bug dropping `ExpiresAt` on meeting insert (caught by e2e), fixed |
+| SP6-3..5 | Low | Prod asset HSTS; unpinned lint/vuln tools; Gitleaks false positives | HSTS added; tools pinned; `.gitleaks.toml` allowlist (scan clean) |
+| BA6-1 | Med | No cross-instance rate-limit test | `TestLimitIsSharedAcrossInstances` |
+| BA6-2 | Med | Chat untested | `chat_test.go` |
+| BA6-3 | Med | Invalid `expiresInMinutes` silently defaulted | Now rejected with 400 |
+| BA6-4..6 | Low | OpenAPI gaps, CI no-op step, plan drift | Fixed |
+| SP6-6 | Info | Author email becomes public | **Accepted**: the user asked for commits under the local git identity |

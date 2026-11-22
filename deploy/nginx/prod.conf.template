@@ -38,6 +38,7 @@ server {
   location = /metrics { return 404; }
   location /assets/ {
     include /tmp/nginx/security-headers.inc;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     add_header Cache-Control "public, max-age=31536000, immutable" always;
     try_files $uri =404;
   }

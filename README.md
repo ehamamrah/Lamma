@@ -70,7 +70,7 @@ PLAN.md             design, decisions and delivery plan
 | Task | Command |
 | --- | --- |
 | Go tests | `scripts/go.sh go test -race ./...` (runs Go in Docker) |
-| Go lint | `docker run --rm -v "$PWD/backend:/src" -w /src golangci/golangci-lint golangci-lint run` |
+| Go lint | `docker run --rm -v "$PWD/backend:/src" -w /src golangci/golangci-lint:v2.15.0 golangci-lint run` |
 | Regenerate SQL code | `scripts/sqlc.sh` |
 | Frontend dev server | `cd frontend && npm ci && npm run dev` (needs the stack running) |
 | Frontend checks | `npm run lint && npm run typecheck && npm test` |

@@ -97,9 +97,11 @@ func (h *Handler) toInput(r *http.Request, req createRequest) CreateInput {
 	}
 }
 
+// minutes converts the request value; 0 means "default". Out-of-range input
+// maps to a negative duration so the service rejects it with invalid_expiry.
 func minutes(n int) time.Duration {
-	if n <= 0 || n > 60*24*366 {
-		return 0
+	if n < 0 || n > 60*24*366 {
+		return -1
 	}
 	return time.Duration(n) * time.Minute
 }

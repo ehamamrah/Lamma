@@ -99,3 +99,44 @@ func TestFallbackIsPerClient(t *testing.T) {
 		t.Fatalf("other clients must keep their own budget in degraded mode: %v", err)
 	}
 }
+
+// A client hanging up must not push the limiter into degraded mode (final review SP6-1).
+func TestCancelledCallerDoesNotDegradeLimiter(t *testing.T) {
+	l, _ := newTestLimiter(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p := Policy{Name: "c", Rate: config.Rate{Count: 1, Period: time.Minute}, FailClosed: true}
+	_ = l.Allow(ctx, p, "k")
+	if l.skipUntil.Load() != 0 {
+		t.Fatal("a cancelled request must not trigger the Redis skip window")
+	}
+	if err := l.Allow(context.Background(), p, "k"); err != nil {
+		t.Fatalf("other clients must still use Redis normally: %v", err)
+	}
+}
+
+// Two API replicas share one budget through Redis (rate limiting across instances).
+func TestLimitIsSharedAcrossInstances(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rej := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "x"}, []string{"policy"})
+	newReplica := func() *Limiter {
+		rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		t.Cleanup(func() { _ = rdb.Close() })
+		return New(rdb, []byte("shared-secret"), rej)
+	}
+	a, b := newReplica(), newReplica()
+	p := Policy{Name: "join", Rate: config.Rate{Count: 10, Period: time.Minute}}
+	ctx := context.Background()
+	for i := range 10 {
+		replica := a
+		if i%2 == 1 {
+			replica = b
+		}
+		if err := replica.Allow(ctx, p, "1.2.3.4"); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if a.Allow(ctx, p, "1.2.3.4") == nil || b.Allow(ctx, p, "1.2.3.4") == nil {
+		t.Fatal("the 11th request must be rejected on every replica")
+	}
+}

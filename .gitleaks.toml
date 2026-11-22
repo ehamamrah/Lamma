@@ -1,0 +1,8 @@
+# Dev-only defaults in compose/.env.example/tests are intentionally public and
+# rejected by the API's production guards.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented dev-only placeholder secrets"
+regexes = ['''lamma-dev-only-[a-z0-9-]+''', '''change-me[a-z0-9-]*''', '''lammadevkey''']

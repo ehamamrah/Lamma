@@ -95,8 +95,10 @@ useEffectsStore.subscribe((s, prev) => {
 
 export const isActive = (s: EffectSettings) => s.background !== 'none' || s.mask !== 'none';
 
-/** Effects need a canvas we can stream and WebAssembly. */
+/** Effects need a canvas we can stream, WebAssembly, and workers with OffscreenCanvas. */
 export const effectsSupported = () =>
   typeof WebAssembly === 'object' &&
+  typeof Worker === 'function' &&
+  typeof OffscreenCanvas === 'function' &&
   typeof HTMLCanvasElement !== 'undefined' &&
   typeof HTMLCanvasElement.prototype.captureStream === 'function';

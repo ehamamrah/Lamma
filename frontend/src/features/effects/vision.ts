@@ -1,7 +1,7 @@
-import type { FaceLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { create } from 'zustand';
+import type { ModelStatus, VisionReply } from './visionTypes';
 
-export type ModelStatus = 'idle' | 'loading' | 'ready' | 'error';
+type Result = Extract<VisionReply, { type: 'result' }>;
 
 /** Load state of the two models, for the picker to show. */
 export const useVisionStatus = create<{ segmenter: ModelStatus; face: ModelStatus }>(() => ({
@@ -12,64 +12,41 @@ export const useVisionStatus = create<{ segmenter: ModelStatus; face: ModelStatu
 // Served by our own Nginx (see scripts/vision-assets.mjs), never a CDN.
 // The folder is versioned, so it can be cached forever.
 declare const __VISION_BASE__: string;
-const BASE = __VISION_BASE__;
-const files = {
-  wasmLoaderPath: `${BASE}/vision_wasm_internal.js`,
-  wasmBinaryPath: `${BASE}/vision_wasm_internal.wasm`,
-};
 
-const RETRY_MS = [2_000, 8_000];
+let worker: Worker | null = null;
+let nextId = 0;
+const pending = new Map<number, (r: Result) => void>();
 
-/**
- * A model that loads the first time it is asked for. Until it is ready,
- * `get()` returns null and callers fall back (the library is code-split,
- * so people who never use effects never download it). A failed load is
- * retried twice, so one network hiccup doesn't leave effects off.
- */
-function lazyModel<T>(key: 'segmenter' | 'face', load: () => Promise<T>) {
-  let instance: T | null = null;
-  let failures = 0;
-  const attempt = () => {
-    useVisionStatus.setState({ [key]: 'loading' });
-    load().then(
-      (m) => {
-        instance = m;
-        useVisionStatus.setState({ [key]: 'ready' });
-      },
-      (err: unknown) => {
-        console.warn(`camera effects: ${key} failed to load`, err);
-        const wait = RETRY_MS[failures++];
-        if (wait === undefined) useVisionStatus.setState({ [key]: 'error' });
-        else setTimeout(attempt, wait);
-      },
-    );
+/** One worker for the whole tab, so preview and meeting share the models. */
+function getWorker(): Worker {
+  if (worker) return worker;
+  worker = new Worker(new URL('./vision.worker.ts', import.meta.url), { type: 'module' });
+  worker.onmessage = (e: MessageEvent<VisionReply>) => {
+    const m = e.data;
+    if (m.type === 'status') useVisionStatus.setState({ [m.key]: m.status });
+    else {
+      pending.get(m.id)?.(m);
+      pending.delete(m.id);
+    }
   };
-  return () => {
-    if (useVisionStatus.getState()[key] === 'idle') attempt();
-    return instance;
+  worker.onerror = () => {
+    useVisionStatus.setState({ segmenter: 'error', face: 'error' });
+    for (const done of pending.values()) done({ type: 'result', id: -1 });
+    pending.clear();
   };
+  worker.postMessage({ type: 'init', base: __VISION_BASE__ });
+  return worker;
 }
 
-// MediaPipe's video mode needs strictly increasing timestamps per model.
-// The models are shared, so the clock is too.
-let lastTs = 0;
-export const nextTimestamp = () => (lastTs = Math.max(performance.now(), lastTs + 1));
-
-const tasks = () => import('@mediapipe/tasks-vision');
-
-export const getSegmenter = lazyModel<ImageSegmenter>('segmenter', async () =>
-  (await tasks()).ImageSegmenter.createFromOptions(files, {
-    baseOptions: { modelAssetPath: `${BASE}/selfie_segmenter.tflite`, delegate: 'CPU' },
-    runningMode: 'VIDEO',
-    outputConfidenceMasks: true,
-    outputCategoryMask: false,
-  }),
-);
-
-export const getFaceLandmarker = lazyModel<FaceLandmarker>('face', async () =>
-  (await tasks()).FaceLandmarker.createFromOptions(files, {
-    baseOptions: { modelAssetPath: `${BASE}/face_landmarker.task`, delegate: 'CPU' },
-    runningMode: 'VIDEO',
-    numFaces: 3,
-  }),
-);
+/**
+ * Asks the worker for the person mask and/or face landmarks of one frame.
+ * The bitmap is transferred (and closed by the worker). Models load on the
+ * first request; until then the result is empty.
+ */
+export function analyse(bitmap: ImageBitmap, want: { segment: boolean; faces: boolean }) {
+  const id = ++nextId;
+  return new Promise<Result>((resolve) => {
+    pending.set(id, resolve);
+    getWorker().postMessage({ type: 'frame', id, bitmap, ...want }, [bitmap]);
+  });
+}

@@ -39,7 +39,8 @@ await mkdir(out, { recursive: true });
 for (const entry of await readdir(publicRoot)) {
   if (entry !== visionDir) await rm(join(publicRoot, entry), { recursive: true, force: true });
 }
-const runtime = ['vision_wasm_internal.js', 'vision_wasm_internal.wasm'];
+// The ES-module build: the models run in a module worker.
+const runtime = ['vision_wasm_module_internal.js', 'vision_wasm_module_internal.wasm'];
 for (const f of runtime) await copyFile(join(wasmDir, f), join(out, f));
 await Promise.all(models.map(ensureModel));
 // The models barely compress, so only the runtime gets a .gz.

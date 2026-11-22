@@ -227,4 +227,5 @@ Re-verification: **PASS WITH CHANGES** — SP4-1 confirmed fixed live; one new M
 | BA8-10 | Low | Hand-written persistence instead of zustand `persist` | **Kept**: a few lines, and storage errors must be swallowed explicitly |
 | SP8-9b | Low | MediaPipe instances never closed after leaving | **Accepted**: reused on the next meeting in the same tab; freed when the tab closes |
 | Bug | — | Mic and camera buttons in the control bar had no accessible name | Labelled "Microphone" and "Camera" |
-
+| CI | — | On the slow CI runner (no GPU) the first effects test froze the page: MediaPipe on the main thread plus full-size canvas blur blocked it for over a minute. Reproduced locally with 6× CPU throttling | Inference moved to a module Web Worker (shared by preview and room); blur done at quarter size; frame budget limits compositing to a third of the main thread. Under 6× throttling, clicks respond in under 150 ms (one took 8 s) and the main thread is about two-thirds idle |
+| CI | — | Model loads failed permanently on one network error | Two retries (2 s, 8 s); `/vision/` connection cap raised to 8; CI uploads Playwright traces on failure |

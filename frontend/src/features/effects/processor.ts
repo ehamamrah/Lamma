@@ -1,16 +1,22 @@
-import type { MPMask, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { Track, TrackProcessor, VideoProcessorOptions } from 'livekit-client';
 import { type EffectSettings, useEffectsStore } from './effects';
 import { faceGeometry } from './geometry';
 import { drawMask } from './masks';
 import { SceneCache, type SceneId } from './scenes';
-import { getFaceLandmarker, getSegmenter, nextTimestamp } from './vision';
+import { analyse } from './vision';
+import type { Landmark, PersonMask } from './visionTypes';
 
 const FPS = 30;
 const MAX_W = 1280;
 const PRIVACY_BLUR = 40;
-/** Segmentation input size: the model works at 256 px, so send it no more. */
-const SEG_W = 256;
+/**
+ * Effects may use at most 1/DUTY of the main thread: after a slow frame the
+ * next ticks are skipped, so weak devices get fewer frames instead of a
+ * frozen page.
+ */
+const DUTY = 3;
+/** Width of the frame sent for analysis (enough for faces at a distance). */
+const ANALYSIS_W = 640;
 
 /** What the processor draws; read every frame so changes apply instantly. */
 export interface EffectsInput extends EffectSettings {
@@ -24,8 +30,9 @@ export interface EffectsInput extends EffectSettings {
  * is selected, no raw frame is drawn: until the model is ready, or if a frame
  * fails, a heavy blur is sent instead.
  *
- * Models run at half the frame rate (segmentation and face landmarks
- * alternate); every frame is composited with the latest results.
+ * The models run in a worker (vision.worker.ts), one frame at a time, so
+ * their speed adapts to the device and never blocks the page. Every frame
+ * is composited here with the latest mask and landmarks.
  */
 export class EffectsProcessor implements TrackProcessor<Track.Kind.Video> {
   readonly name = 'lamma-effects';
@@ -36,13 +43,14 @@ export class EffectsProcessor implements TrackProcessor<Track.Kind.Video> {
   private canvas = document.createElement('canvas');
   private ctx = this.canvas.getContext('2d')!;
   private mask = new MaskBuffer();
-  private segInput = document.createElement('canvas');
-  private faces: NormalizedLandmark[][] = [];
+  private faces: Landmark[][] = [];
+  private analysing = false;
+  private generation = 0; // bumped on restart, so stale results are dropped
   private blur = new Blur();
   private scenes = new SceneCache();
   private clock = new Clock(() => this.safeFrame());
-  private frameNo = 0;
   private warned = false;
+  private busyUntil = 0;
   private lastFrameTime = -1;
 
   constructor(private input: () => EffectsInput = () => useEffectsStore.getState()) {}
@@ -65,20 +73,30 @@ export class EffectsProcessor implements TrackProcessor<Track.Kind.Video> {
   /** LiveKit calls this when the camera track is replaced (unmute, new device). */
   async restart(opts: VideoProcessorOptions) {
     this.clock.stop();
+    this.generation++;
     this.mask.ready = false; // blur until the new camera has been segmented
+    this.faces = [];
     await this.init(opts);
   }
 
   async destroy() {
     this.clock.dispose();
+    this.generation++;
     this.processedTrack?.stop();
     this.processedTrack = undefined;
     this.own.srcObject = null;
-    for (const c of [this.canvas, this.segInput, this.mask.canvas]) c.width = c.height = 0;
+    for (const c of [this.canvas, this.mask.canvas]) c.width = c.height = 0;
     this.scenes.clear();
   }
 
   private safeFrame() {
+    const start = performance.now();
+    if (start < this.busyUntil) return;
+    this.drawFrame();
+    this.busyUntil = start + (performance.now() - start) * DUTY;
+  }
+
+  private drawFrame() {
     const s = this.input();
     try {
       this.frame(s);
@@ -96,9 +114,7 @@ export class EffectsProcessor implements TrackProcessor<Track.Kind.Video> {
     if (v.readyState < 2 || v.currentTime === this.lastFrameTime) return;
     this.lastFrameTime = v.currentTime;
     const { w, h } = this.fit(v.videoWidth, v.videoHeight);
-    const even = this.frameNo++ % 2 === 0;
-    if (s.background !== 'none' && (even || s.mask === 'none')) this.segment();
-    if (s.mask !== 'none' && (!even || s.background === 'none')) this.detectFaces();
+    this.requestAnalysis(s);
     if (s.background === 'none') this.ctx.drawImage(v, 0, 0, w, h);
     else this.composite(s, w, h);
     if (s.mask !== 'none') this.drawMasks(s, w, h);
@@ -115,23 +131,25 @@ export class EffectsProcessor implements TrackProcessor<Track.Kind.Video> {
     return { w, h };
   }
 
-  private segment() {
-    const segmenter = getSegmenter();
-    if (!segmenter) return;
+  /** Sends the current frame to the worker unless one is still being analysed. */
+  private requestAnalysis(s: EffectsInput) {
+    if (this.analysing) return;
+    const want = { segment: s.background !== 'none', faces: s.mask !== 'none' };
     const v = this.video;
-    const c = this.segInput;
-    c.width = SEG_W;
-    c.height = Math.round((SEG_W * v.videoHeight) / v.videoWidth);
-    c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
-    segmenter.segmentForVideo(c, nextTimestamp(), (r) => {
-      const m = r.confidenceMasks?.[0];
-      if (m) this.mask.write(m);
-    });
-  }
-
-  private detectFaces() {
-    const lm = getFaceLandmarker();
-    if (lm) this.faces = lm.detectForVideo(this.video, nextTimestamp()).faceLandmarks;
+    const gen = this.generation;
+    this.analysing = true;
+    createImageBitmap(v, {
+      resizeWidth: ANALYSIS_W,
+      resizeHeight: Math.round((ANALYSIS_W * v.videoHeight) / v.videoWidth),
+    })
+      .then((bitmap) => analyse(bitmap, want))
+      .then((r) => {
+        if (gen !== this.generation) return;
+        if (r.mask) this.mask.write(r.mask);
+        if (want.faces) this.faces = r.faces ?? this.faces;
+      })
+      .catch(() => undefined) // a skipped frame; the next tick tries again
+      .finally(() => (this.analysing = false));
   }
 
   private composite(s: EffectsInput, w: number, h: number) {
@@ -179,14 +197,14 @@ class MaskBuffer {
   private ctx = this.canvas.getContext('2d')!;
   private img: ImageData | null = null;
 
-  write(m: MPMask) {
+  write(m: PersonMask) {
     if (!this.img || this.img.width !== m.width || this.img.height !== m.height) {
       this.canvas.width = m.width;
       this.canvas.height = m.height;
       this.img = this.ctx.createImageData(m.width, m.height);
       this.img.data.fill(255);
     }
-    const conf = m.getAsFloat32Array();
+    const conf = m.data;
     const px = this.img.data;
     for (let i = 0; i < conf.length; i++) {
       // Soft threshold: crisper edges without a hard cut-out look.
@@ -198,23 +216,34 @@ class MaskBuffer {
   }
 }
 
-/** Blurs a frame: canvas filters where supported, else down- and up-scaling. */
+const BLUR_SCALE = 4;
+
+/**
+ * Blurs a frame cheaply: a quarter-size copy is blurred (with a canvas
+ * filter where supported) and scaled back up. Blurring at full size is far
+ * too slow without a GPU.
+ */
 class Blur {
   private small = document.createElement('canvas');
+  private sctx = this.small.getContext('2d')!;
   private filter: boolean | null = null;
 
   draw(ctx: CanvasRenderingContext2D, src: CanvasImageSource, w: number, h: number, px: number) {
-    this.filter ??= supportsFilter(ctx);
-    if (this.filter) {
-      ctx.filter = `blur(${px}px)`;
-      ctx.drawImage(src, -px, -px, w + 2 * px, h + 2 * px); // hide soft edges
-      ctx.filter = 'none';
-      return;
+    this.filter ??= supportsFilter(this.sctx);
+    // Without filters, shrink further so the upscale alone blurs enough.
+    const k = this.filter ? BLUR_SCALE : Math.max(BLUR_SCALE, px / 2);
+    const sw = Math.max(8, Math.round(w / k));
+    const sh = Math.max(8, Math.round(h / k));
+    if (this.small.width !== sw || this.small.height !== sh) {
+      this.small.width = sw;
+      this.small.height = sh;
     }
-    const k = Math.max(2, px / 2);
-    this.small.width = Math.max(8, Math.round(w / k));
-    this.small.height = Math.max(8, Math.round(h / k));
-    this.small.getContext('2d')!.drawImage(src, 0, 0, this.small.width, this.small.height);
+    if (this.filter) {
+      const r = px / k;
+      this.sctx.filter = `blur(${r}px)`;
+      this.sctx.drawImage(src, -r, -r, sw + 2 * r, sh + 2 * r); // hide soft edges
+      this.sctx.filter = 'none';
+    } else this.sctx.drawImage(src, 0, 0, sw, sh);
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.small, 0, 0, w, h);
   }

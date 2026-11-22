@@ -83,10 +83,13 @@ no module can call another module's queries.
   Each camera frame is drawn on a canvas: the background is replaced using
   MediaPipe's selfie segmenter, and face masks are drawn from the face
   landmarker's points. LiveKit publishes `canvas.captureStream()` instead of
-  the camera. The processor is attached only while an effect is on. If an
+  the camera. MediaPipe runs in a module Web Worker
+  (`vision.worker.ts`), one frame at a time. The page only composites, and
+  skips frames so effects use at most a third of the main thread. The
+  processor is attached only while an effect is on. If an
   effect is chosen before joining, it goes into the capture options so the
-  first published frame is already processed. MediaPipe is code-split and
-  loaded on first use. Its wasm and models are served from `/vision/` on
+  first published frame is already processed. MediaPipe lives only in the
+  worker bundle, which loads on first use. Its wasm and models are served from `/vision/` on
   our own origin. `scripts/vision-assets.mjs` copies and downloads them at
   build time and verifies their checksums.
 - `shared/api`: the typed client for our REST API (`/api/v1`), described in

@@ -4,15 +4,26 @@ import {
   LayoutContextProvider,
   LiveKitRoom,
   RoomAudioRenderer,
+  StartAudio,
 } from '@livekit/components-react';
+import { Circle, PenLine, Shield } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { Alert } from '@/shared/ui/alert';
 import { cn } from '@/shared/lib/utils';
+import { boardHost, useCollabStore } from '@/stores/collab';
 import { useMeetingStore } from '@/stores/meeting';
 import { onDisconnected, onRoomError } from '@/features/meeting/session';
 import { ChatPanel } from '@/features/chat/ChatPanel';
 import { HostPanel } from '@/features/moderation/HostPanel';
-import { type WaitingList, useWaitingList } from '@/features/moderation/useWaitingList';
+import { useWaitingList } from '@/features/moderation/useWaitingList';
 import { ParticipantsPanel } from '@/features/participants/ParticipantsPanel';
+import { ReactionOverlay } from '@/features/reactions/ReactionOverlay';
+import type { Emoji } from '@/features/reactions/reactions';
+import { useReactions } from '@/features/reactions/useReactions';
+import { RecordingBadge } from '@/features/recording/RecordingBadge';
+import { useRecording } from '@/features/recording/useRecording';
+import { useCollabSync } from '@/features/collab/useCollabSync';
+import type { Action } from './actions';
 import { ControlBar, type Panel } from './ControlBar';
 import { roomOptions } from './roomOptions';
 import { Stage } from './Stage';
@@ -48,6 +59,11 @@ export function MeetingRoom({ code }: { code: string }) {
         <RoomLayout code={code} />
       </LayoutContextProvider>
       <RoomAudioRenderer />
+      {/* Mobile browsers block audio until the user taps. */}
+      <StartAudio
+        label="Tap to turn on sound"
+        className="fixed left-1/2 top-4 z-50 -translate-x-1/2"
+      />
       <ConnectionStateToast />
     </LiveKitRoom>
   );
@@ -56,34 +72,74 @@ export function MeetingRoom({ code }: { code: string }) {
 function RoomLayout({ code }: { code: string }) {
   const [panel, setPanel] = useState<Panel>(null);
   const isHost = useMeetingStore((s) => s.me?.role === 'host'); // display only
+  const react = useReactions();
+  useCollabSync(isHost);
+  const bar = { code, panel, onPanel: setPanel, onReact: react };
+
   return (
     <>
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 p-2">
+        <div className="relative min-w-0 flex-1 p-1 md:p-2">
           <Stage />
+          <ReactionOverlay />
+          <RecordingBadge />
         </div>
         <aside
           className={cn(
             'w-full max-w-sm border-l border-border bg-card max-md:fixed max-md:inset-0 max-md:z-20 max-md:max-w-none',
-            !panel && 'hidden',
+            // The host panel has its own overlay container (HostControls).
+            (!panel || panel === 'host') && 'hidden',
           )}
         >
           {panel === 'chat' && <ChatPanel code={code} onClose={() => setPanel(null)} />}
           {panel === 'people' && <ParticipantsPanel code={code} onClose={() => setPanel(null)} />}
         </aside>
       </div>
-      {isHost ? (
-        <HostControls code={code} panel={panel} onPanel={setPanel} />
-      ) : (
-        <ControlBar code={code} panel={panel} onPanel={setPanel} />
-      )}
+      {isHost ? <HostControls {...bar} /> : <ControlBar {...bar} />}
     </>
   );
 }
 
-/** Hosts track the waiting room even with the panel closed (badge + panel). */
-function HostControls(props: { code: string; panel: Panel; onPanel: (p: Panel) => void }) {
-  const waiting: WaitingList = useWaitingList(props.code);
+interface BarProps {
+  code: string;
+  panel: Panel;
+  onPanel: (p: Panel) => void;
+  onReact: (e: Emoji) => void;
+}
+
+/** Hosts also get the whiteboard, recording and the host panel (with badges). */
+function HostControls(props: BarProps) {
+  const waiting = useWaitingList(props.code);
+  const rec = useRecording(props.code);
+  const board = useCollabStore((s) => s.host.board);
+  const requests = useCollabStore((s) => s.host.requests.length);
+  const extra: Action[] = [
+    {
+      key: 'board',
+      label: board === 'off' ? 'Open whiteboard' : 'Close whiteboard',
+      icon: <PenLine />,
+      active: board !== 'off',
+      badge: requests,
+      onClick: () => (board === 'off' ? boardHost.open('solo') : boardHost.close()),
+    },
+    {
+      key: 'host',
+      label: 'Host controls',
+      icon: <Shield />,
+      active: props.panel === 'host',
+      badge: waiting.waiting.length,
+      onClick: () => props.onPanel(props.panel === 'host' ? null : 'host'),
+    },
+  ];
+  if (rec.supported) {
+    extra.splice(1, 0, {
+      key: 'record',
+      label: rec.recording ? 'Stop recording' : 'Record',
+      icon: <Circle className={cn(rec.recording && 'fill-current')} />,
+      danger: rec.recording,
+      onClick: () => (rec.recording ? rec.stop() : void rec.start()),
+    });
+  }
   return (
     <>
       {props.panel === 'host' && (
@@ -91,7 +147,10 @@ function HostControls(props: { code: string; panel: Panel; onPanel: (p: Panel) =
           <HostPanel code={props.code} waiting={waiting} onClose={() => props.onPanel(null)} />
         </aside>
       )}
-      <ControlBar {...props} waitingCount={waiting.waiting.length} />
+      {rec.error && (
+        <Alert className="fixed left-1/2 top-4 z-40 -translate-x-1/2">{rec.error}</Alert>
+      )}
+      <ControlBar {...props} extra={extra} />
     </>
   );
 }

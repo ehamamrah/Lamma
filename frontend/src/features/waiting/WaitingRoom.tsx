@@ -11,7 +11,7 @@ export function WaitingRoom({ code }: { code: string }) {
   useAdmission(code, onDecision);
 
   return (
-    <main className="mx-auto grid min-h-full max-w-5xl items-center gap-6 p-6 md:grid-cols-[3fr_2fr]">
+    <main className="mx-auto grid min-h-full max-w-5xl content-center items-center gap-4 p-4 md:grid-cols-[3fr_2fr] md:gap-6 md:p-6">
       <DevicePreview />
       <Card className="flex flex-col items-center gap-3 text-center" aria-live="polite">
         <Loader2 className="size-8 animate-spin text-primary" aria-hidden />

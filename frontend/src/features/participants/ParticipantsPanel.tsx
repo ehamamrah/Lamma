@@ -1,5 +1,4 @@
 import { useParticipants } from '@livekit/components-react';
-import type { Participant } from 'livekit-client';
 import { MicOff, UserMinus, VolumeX } from 'lucide-react';
 import { errorMessage } from '@/shared/api/client';
 import { api } from '@/shared/api/meetings';
@@ -9,15 +8,7 @@ import { Badge } from '@/shared/ui/badge';
 import { Button } from '@/shared/ui/button';
 import { useMeetingStore } from '@/stores/meeting';
 import { PanelHeader } from '@/features/room/PanelHeader';
-
-/** Role from server-set metadata. Display only: the API enforces permissions. */
-function roleOf(p: Participant): string | undefined {
-  try {
-    return (JSON.parse(p.metadata ?? '{}') as { role?: string }).role;
-  } catch {
-    return undefined;
-  }
-}
+import { roleOf } from '@/features/room/participant';
 
 export function ParticipantsPanel({ code, onClose }: { code: string; onClose: () => void }) {
   const participants = useParticipants();

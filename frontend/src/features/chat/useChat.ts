@@ -1,13 +1,14 @@
-import { useDataChannel } from '@livekit/components-react';
+import { useRoomContext } from '@livekit/components-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/shared/api/meetings';
+import { onServerData } from '@/features/room/data';
 import type { ChatMessage } from '@/shared/api/types';
 import { mergeMessages, parseMessage } from './messages';
 
 /**
  * Chat is sent through the API (validated, rate-limited) and delivered by
- * LiveKit from the server. Clients cannot publish data, so only messages
- * without a participant sender (i.e. from the server) are accepted.
+ * LiveKit from the server. Peers can publish data (reactions, whiteboard), so
+ * only server-sent packets are accepted as chat.
  */
 export function useChat(code: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -19,11 +20,15 @@ export function useChat(code: string) {
     );
   }, [code]);
 
-  useDataChannel('lamma.chat', (msg) => {
-    if (msg.from) return;
-    const m = parseMessage(msg.payload);
-    if (m) setMessages((cur) => mergeMessages(cur, [m]));
-  });
+  const room = useRoomContext();
+  useEffect(
+    () =>
+      onServerData(room, 'lamma.chat', (payload) => {
+        const m = parseMessage(payload);
+        if (m) setMessages((cur) => mergeMessages(cur, [m]));
+      }),
+    [room],
+  );
 
   const send = useCallback(
     async (text: string) => {

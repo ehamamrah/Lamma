@@ -88,6 +88,16 @@ To add a migration, create the next numbered pair
 `NNNNNN_name.up.sql` / `.down.sql`, then run `scripts/sqlc.sh` if any
 queries change.
 
+Migrations that drop or rename columns break API replicas still running the
+old code (sqlc expands `SELECT *` into explicit columns). For those, stop the
+API, migrate, then start the new version. `000002_unlimited_participants`
+(drops `meetings.max_participants`) is one of them:
+
+```sh
+docker compose stop api
+docker compose up -d --build   # migrate runs before the new api starts
+```
+
 ## Environment variables
 
 Defaults are in [.env.example](../.env.example) and
@@ -109,7 +119,6 @@ Defaults are in [.env.example](../.env.example) and
 | `TRUSTED_PROXY_CIDRS` | `172.30.0.10/32` | Peers whose `X-Forwarded-For` is trusted |
 | `CORS_ALLOWED_ORIGINS` | empty | Extra allowed origins (https only in production) |
 | `MEETING_DEFAULT_TTL` / `MEETING_MAX_TTL` / `MEETING_RETENTION` | `24h` / `168h` / `168h` | Meeting lifetime and data retention |
-| `MEETING_MAX_PARTICIPANTS` | 50 | Seats per meeting; the host gets an extra seat |
 | `RATE_LIMIT_*` | see `.env.example` | `N/period`, e.g. `10/m`, `5/15m` |
 | `ARGON2_MAX_CONCURRENT` | CPU count | Password-hashing slots |
 | `BREAKER_FAILURE_THRESHOLD` / `BREAKER_OPEN_TIMEOUT` | 5 / `30s` | LiveKit circuit breakers |

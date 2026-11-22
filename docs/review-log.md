@@ -182,3 +182,25 @@ Re-verification: **PASS WITH CHANGES** — SP4-1 confirmed fixed live; one new M
 | BA6-3 | Med | Invalid `expiresInMinutes` silently defaulted | Now rejected with 400 |
 | BA6-4..6 | Low | OpenAPI gaps, CI no-op step, plan drift | Fixed |
 | SP6-6 | Info | Author email becomes public | **Accepted**: the user asked for commits under the local git identity |
+
+## Phase 7 — Mobile, no participant cap, reactions, whiteboard, recording
+
+- security-performance-reviewer: **FAIL** (2 High) → fixed.
+- backend-architect: **APPROVE WITH CHANGES** (no High).
+
+| # | Sev | Finding | Resolution |
+| --- | --- | --- | --- |
+| SP7-1 | **High** | With data publishing on, a guest could spoof server chat in the window where receivers don't know the sender yet (`from` undefined) | `onServerData` accepts only packets with no participant identity (unforgeable); used for chat and waiting signals; unit test |
+| SP7-2 | **High** | Every pointer move copied state and fully redrew/reallocated the canvas | Canvas resized only on resize; redraws via store subscription, at most once per frame; budgets lowered |
+| SP7-3 | Med | No board rate gate; one drawer could use every stroke slot | 40 msgs/s per drawer; 2k points per stroke, 300 strokes per author, 200k points per board |
+| SP7-4 | Med | `hello` floods made the host re-serialise the board | Snapshot cached by reference; 3/min per guest and 5/s overall |
+| SP7-5 | Med | No participant ceiling at all | **Accepted**: product requirement (no cap). Host lock / waiting room; per-IP join limits; documented in security.md |
+| SP7-6 | Med | Any guest can flood data messages | **Accepted** and documented; receive-side gates; host can remove |
+| SP7-7/8 | Med/Low | Recording held in RAM unbounded; capture leaked if setup threw | 2.5 Mbps, auto-stop and save at 1.5 GB; cleanup on setup errors |
+| SP7-9..12 | Low | Reaction re-render storm; rate-gate keys never pruned; stale comment | Reactions in their own store read only by the overlay, plus a room-wide gate; idle keys pruned; comment fixed |
+| BA7-1 | Med | Host reload left guests with a stale board | Guests drop the board when the host leaves; snapshots merge with live strokes |
+| BA7-3 | Med | Dropping a column breaks old replicas mid-deploy | Stop-migrate-start procedure in operations.md |
+| BA7-4 | Med | Receive-side authorization untested | `useCollabSync.test.ts` covers host-state spoofing, unapproved strokes, guest clear, gates |
+| BA7-5..7 | Med/Low | Stale capacity and data-grant wording in PLAN, docs and comments | Updated (A4, §5, §6, ADR-004/013, test plan) |
+| BA7-8..12 | Low | Store/feature import cycle, empty full-screen aside behind the host panel, clipboard rejection, timers, down-migration default | Protocol moved to `features/collab`; aside hidden for the host panel; caught errors; timers cleared; `DROP DEFAULT` |
+| Bug | — | Waiting room flickered after granting camera access | Stable `usePreviewTracks` error callback (it re-created tracks every render); browser e2e asserts no repeated `getUserMedia` |

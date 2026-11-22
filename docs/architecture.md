@@ -58,13 +58,27 @@ no module can call another module's queries.
 
 ## Frontend (`frontend/src`)
 
-- `features/*`: one folder per screen (home, meeting, prejoin, waiting,
-  room, chat, participants, moderation).
+- `features/*`: one folder per screen or feature (home, meeting, prejoin,
+  waiting, room, chat, participants, moderation, reactions, whiteboard,
+  recording).
 - Stage transitions all live in `features/meeting/session.ts`. Components
   call those functions; they never write the stage directly.
 - `stores/meeting.ts` (Zustand) holds meeting, session and device
   preferences only. Media state stays in LiveKit, and roles shown in the UI
   are for display only.
+- `stores/collab.ts` holds in-room collaboration state: the host's
+  announced state (recording, whiteboard mode, drawers, draw requests) and
+  the whiteboard strokes.
+- **Reactions, the whiteboard and the recording indicator** run peer to peer over LiveKit data
+  messages (`features/whiteboard/protocol.ts` defines and validates them).
+  The host's browser is the authority: it announces state, answers late
+  joiners with a snapshot, and approves draw requests. See
+  [security.md](security.md#peer-to-peer-collaboration).
+- **Layout:** below 768px the control bar keeps mic, camera, reactions,
+  chat and leave, and moves the rest into a "More" sheet. The whiteboard or
+  a screen share takes focus, with the cameras in a strip beside it
+  (desktop) or below it (phone). Recording media never leaves the host's
+  browser; only the on/off flag is shared.
 - `shared/api`: the typed client for our REST API (`/api/v1`), described in
   [api/openapi.yaml](../api/openapi.yaml).
 

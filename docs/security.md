@@ -18,11 +18,54 @@ code, with the host's moderation powers on top.
 - **CSRF:** SameSite=Strict cookies, an Origin / `Sec-Fetch-Site` check on
   unsafe methods, and JSON-only request bodies.
 - **LiveKit tokens:** valid for 2 minutes, for one room only, with an
-  identity set by the server. No admin, data-publish or metadata-update
-  permissions. Host powers exist only in the API. Rooms are never
+  identity set by the server. No admin or metadata-update permissions.
+  Host powers exist only in the API. Rooms are never
   auto-created. Every `participant_joined` webhook is checked against the
   database, intruders are evicted, and a 5-minute anti-entropy sweep catches
   any webhooks that were lost.
+
+## Peer-to-peer collaboration
+
+Reactions and the whiteboard travel as LiveKit data messages, so tokens
+allow data publishing. LiveKit stamps every message with the sender's
+identity and server-signed metadata (which holds the role and which
+participants cannot change), so receivers can trust who sent what:
+
+- **Chat** is accepted only from the server (no participant sender), so
+  peers cannot spoof chat messages.
+- **Host state** (recording flag, whiteboard mode, who may draw) is accepted
+  only from a participant whose role is `host`.
+- **Strokes** are applied only if the host's current state lets that sender
+  draw (the host always can; guests only in collaborative mode after the
+  host approves them). Clearing the board is host-only, and a stroke can
+  only be extended or undone by its author.
+- **Validation:** every message is parsed against a strict schema: emojis
+  and colours from fixed lists, coordinates in 0..1, and bounded point
+  counts, stroke counts and id lengths. Reactions and guest-to-host messages
+  are rate limited per sender on the receiving side.
+- **Recording** happens in the host's browser (screen capture plus
+  MediaRecorder) and is downloaded locally; nothing is uploaded. While it
+  runs, every participant sees a "Recording" indicator.
+
+- **Flood limits** (receive side): strokes 40 messages/s per drawer; board
+  budgets of 2,000 points per stroke, 300 strokes per author and 200,000
+  points in total; snapshot requests 3/min per guest and 5/s overall (the
+  host caches the serialised board); reactions 5 per 3 s per sender and 10/s
+  overall. The board redraws at most once per animation frame.
+
+Accepted risks:
+
+- Any admitted guest can publish data, so a malicious client can still send
+  junk messages. Receivers drop them, but they cost bandwidth and parsing.
+  The host's remove action is the backstop. A stricter design would grant
+  data publishing per participant from the API when the host approves.
+- There is no participant cap (product requirement). Joins are limited per
+  IP and per IP per meeting, so many IPs can grow an open meeting. Hosts
+  close it with lock or gate it with the waiting room; operators should
+  size LiveKit nodes for their largest meetings.
+- The recording indicator relies on the host's browser announcing it. A
+  modified client could record without showing it, as anyone can with a
+  screen recorder.
 
 ## Abuse controls
 
@@ -38,7 +81,8 @@ code, with the host's moderation powers on top.
   - Waiting room: 3 per origin, 50 per meeting.
   - Seats: claimed at token time with leases; at most 3 unconnected seats
     per origin.
-  - Admitted guest rows: at most 4× capacity.
+  - Meetings have no participant cap; join rate limits per IP bound
+    scripted joins, and the host can lock or gate the meeting.
   - SSE streams: 3 per IP and 2,000 per replica.
 - **Trusted proxies:** `X-Forwarded-For` is trusted only from Nginx's fixed
   IP (`TRUSTED_PROXY_CIDRS`), and Nginx overwrites the header rather than

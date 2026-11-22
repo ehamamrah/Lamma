@@ -26,7 +26,7 @@ export function PreJoin({ code }: { code: string }) {
   }
 
   return (
-    <main className="mx-auto grid min-h-full max-w-5xl items-center gap-6 p-6 md:grid-cols-[3fr_2fr]">
+    <main className="mx-auto grid min-h-full max-w-5xl content-center items-center gap-4 p-4 md:grid-cols-[3fr_2fr] md:gap-6 md:p-6">
       <DevicePreview />
       <Card>
         <form className="flex flex-col gap-4" onSubmit={onSubmit}>

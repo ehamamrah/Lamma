@@ -36,7 +36,7 @@
 | A1 | What "expiration" means | `expires_at` bounds the meeting's lifetime. At expiry the meeting is ended and the LiveKit room is deleted. Default 24h, max 7d (env). |
 | A2 | How a host proves identity without accounts | An opaque, high-entropy **session token** in an `HttpOnly` cookie, scoped to the meeting path. Host = a participant session with `role=host`. |
 | A3 | Removed participants rejoining | Removal kills the session and LiveKit is guarded by webhook checks, but an anonymous user can always start a **new** session. The host can **lock** or enable the **waiting room** to stop re-entry. Documented limitation. |
-| A4 | Chat transport | Messages go through the backend (rate-limited, validated) and are fanned out via LiveKit server `SendData`. Clients get **no** `canPublishData` grant, so chat cannot be spoofed or flood the room. |
+| A4 | Chat transport | Messages go through the backend (rate-limited, validated) and are fanned out via LiveKit server `SendData`. Chat is accepted only from server packets (no participant identity), so it cannot be spoofed. Since ADR-017 clients may publish data for reactions and the whiteboard. |
 | A5 | Chat history | Last 100 messages kept in Redis (TTL = meeting expiry) so late joiners see context. Not persisted to Postgres. |
 | A6 | Muting | Host can **mute** (server-side `MutePublishedTrack`). Host can **never unmute** others (privacy). |
 | A7 | Participant limits | Global LiveKit room limit + backend admission check (default 50/meeting). |
@@ -101,7 +101,7 @@ infrastructure (postgres.go, livekit adapter) ── implements ports
 ### Core entities
 
 - **Meeting**: `id (uuid)`, `code` (public), `title`, `passwordHash?`,
-  `waitingRoom`, `locked`, `status (active|ended)`, `maxParticipants`,
+  `waitingRoom`, `locked`, `status (active|ended)`,
   `createdAt`, `expiresAt`, `endedAt?`.
 - **Participant**: `id (uuidv7)`, `meetingID`, `displayName`,
   `role (host|guest)`, `status (waiting|admitted|denied|removed|left)`,
@@ -152,7 +152,7 @@ Set-Cookie: __Secure-lamma_sid=<token>; Path=/api/v1/meetings/<code>;
 LiveKit grants (identical for host and guest — host powers live in the API):
 `roomJoin`, `room=<meeting uuid>`, `canPublish`, `canSubscribe`,
 `canPublishSources=[camera, microphone, screen_share, screen_share_audio]`,
-`canPublishData=false`, `canUpdateOwnMetadata=false`, `hidden=false`.
+`canPublishData=true` (ADR-017), `canUpdateOwnMetadata=false`, `hidden=false`.
 Server sets participant `metadata={"role":"host|guest"}` for **display only**.
 
 ---
@@ -168,7 +168,6 @@ CREATE TABLE meetings (
   password_hash    text,
   waiting_room     boolean NOT NULL DEFAULT false, locked boolean NOT NULL DEFAULT false,
   status           meeting_status NOT NULL DEFAULT 'active',
-  max_participants int NOT NULL CHECK (max_participants BETWEEN 2 AND 500),
   created_at       timestamptz NOT NULL DEFAULT now(),
   expires_at       timestamptz NOT NULL, ended_at timestamptz,
   room_created_at  timestamptz,          -- LiveKit room exists (cleared on room_finished)
@@ -217,20 +216,23 @@ CREATE TABLE moderation_events (           -- append-only audit log
 CREATE INDEX moderation_events_meeting ON moderation_events (meeting_id, created_at);
 ```
 
-### Seats (capacity model)
+### Seats (lease model)
 
-A participant **holds a seat** when `status='admitted' AND (in_room OR
-lease_until > now())`. Seats are claimed at **token issuance**, not at join or
-admit, so closed tabs and scripted joins cannot hold capacity:
+Meetings have **no participant cap** (migration 000002 dropped
+`max_participants`): anyone with the link can join. The host closes the meeting
+with **Lock** (no new joiners) or gates it with the **waiting room** (approval
+only). Leases are kept purely as an abuse control. A participant holds a lease
+when `status='admitted' AND (in_room OR lease_until > now())`, claimed at
+**token issuance**:
 
 - `/token` claims (or renews) a lease equal to the LiveKit token TTL (2 min)
-  inside the capacity transaction, so a token can never outlive its seat.
+  inside the seat transaction, so a token can never outlive its lease.
 - At most **3 leased-but-unconnected seats per `origin_hash`** per meeting, so
-  one IP cannot fill a meeting by minting sessions.
+  one IP cannot mint tokens in bulk.
 - A participant may hold at most **3 leases without connecting** (`lease_count`,
   reset by `participant_joined`), so a script cannot squat a seat by renewing.
-- The **host is exempt** from the seat count (a host can always rejoin to
-  moderate); LiveKit's `max_participants` is set to `max + 1` and is the hard cap.
+- The **host is exempt** from the per-origin caps (a host can always rejoin to
+  moderate). LiveKit rooms are created with `max_participants: 0` (unlimited).
 - `participant_joined` webhook sets `in_room=true`; the lease no longer matters.
 - `participant_left` / `room_finished` sets `in_room=false`; the seat frees.
 
@@ -240,7 +242,7 @@ admit, so closed tabs and scripted joins cannot hold capacity:
 | --- | --- |
 | Resolve session (every authenticated request) | `participants.session_hash` unique |
 | Lookup meeting by code (join, public info) | `meetings.code` unique |
-| Count seats at token issuance | `participants_meeting_status` |
+| Count unconnected leases per origin at token issuance | `participants_meeting_status` |
 | List / count waiting participants | `participants_meeting_status` |
 | Expire meetings batch | `meetings_expiry_active` (partial) |
 | Reconcile rooms still open after end | `meetings_room_open` (partial) |
@@ -249,9 +251,9 @@ admit, so closed tabs and scripted joins cannot hold capacity:
 
 ### Transactions and concurrency
 
-- **Seat claim**: `SELECT … FROM meetings WHERE id=$1 FOR UPDATE`, count seats
-  excluding the caller, set caller's `lease_until` — one transaction, so
-  concurrent token requests cannot exceed `max_participants`.
+- **Seat claim**: `SELECT … FROM meetings WHERE id=$1 FOR UPDATE`, count the
+  origin's unconnected leases excluding the caller, set caller's `lease_until`
+  — one transaction, so concurrent requests cannot exceed the per-origin cap.
 - **Liveness guard**: every guard query includes `status='active' AND
   expires_at > now()` — expiry is effective immediately, not when the worker runs.
 - **Session resolve** is a read model owned by `access`: one query joining
@@ -343,7 +345,7 @@ POST /api/v1/meetings
 ```
 
 Status codes: join `200 admitted` / `202 waiting`; `401 password_required |
-invalid_password`; `403 meeting_locked | removed | denied`; `409 meeting_full |
+invalid_password`; `403 meeting_locked | removed | denied`; `409
 waiting_room_full`; `404 not_found`; `429 rate_limited` (+ `Retry-After`);
 `503 server_busy | livekit_unavailable` (+ `Retry-After`). Moderation returns
 `204`, or `202 {"livekitPending":true}` when the DB change committed but the
@@ -390,9 +392,9 @@ waiters by LiveKit `SendData` to the host identity (best effort) and the host
 UI loads the list on that signal.
 
 **Token** → principal `admitted`, meeting active and unexpired → seat-claim tx
-(`409 meeting_full`; commits) → skip `CreateRoom` only if `room_created_at`
+(`429 too_many_pending`; commits) → skip `CreateRoom` only if `room_created_at`
 is set **and** someone in the meeting is `in_room`; otherwise call `CreateRoom`
-(idempotent; `max_participants`, `empty_timeout`) via the `livekit_room`
+(idempotent; unlimited participants, `empty_timeout`) via the `livekit_room`
 breaker and set `room_created_at` → sign JWT locally → return. A busy room
 never touches LiveKit on the token path, and a lost `room_finished` webhook
 cannot strand a meeting.
@@ -405,7 +407,8 @@ calls the owning module's service (`participant.Remove`, `meeting.End`, …),
 which writes state + audit in one statement → after commit, the LiveKit call
 runs with `context.WithoutCancel(ctx)` + 3s timeout (a client disconnect can't
 skip it) → `204`, or `202 livekitPending` on LiveKit failure. Admitting runs
-no capacity check (capacity is enforced at token time).
+no capacity check (meetings have no cap; the per-origin lease cap applies at
+token time).
 
 **Mute** → `realtime.MuteSource(room, identity, source)` = `GetParticipant` →
 find track by source → `MutePublishedTrack`; retried as one unit.
@@ -551,8 +554,8 @@ OTel → close Redis → close pgx pool. Compose `stop_grace_period: 30s`.
   sessions never need the password again). 8-char minimum + argon2 cost.
   Constant-time comparison is inherent to argon2id verification.
 - **Enumeration**: 60-bit codes, uniform 404, lookup rate limit.
-- **Abuse**: creation limits, global per-IP limits, max participants,
-  max meeting duration, seat leases (closed tabs free capacity in 2 min; max 3
+- **Abuse**: creation limits, global per-IP limits,
+  max meeting duration, seat leases (closed tabs release their lease in 2 min; max 3
   unconnected leased seats per origin per meeting), waiting-room caps (3 per
   origin, 50 per meeting), SSE caps.
 - **LiveKit**: `room.auto_create: false` — rooms exist only after an API
@@ -657,7 +660,7 @@ Full ADRs go in `docs/adr/NNNN-*.md` in Phase 1 review.
 | 001 | Modular monolith, packages per module, layers as files | Simplest deployable unit; clear boundaries; cheap to split later | Microservices (rule 2), deep `domain/app/infra` dirs (ceremony) |
 | 002 | LiveKit for all media + TURN | Proven SFU, Go SDK, webhooks | Custom SFU (rule 6) |
 | 003 | Cookie session (hashed) for host/guest identity | `HttpOnly` keeps credential away from XSS; server-side revocation | JWT in localStorage (XSS-exposed, no revocation) |
-| 004 | Chat through backend → LiveKit `SendData` | Server-side rate limit/validation; no client data publish | Client data channels (unenforceable limits, spoofing) |
+| 004 | Chat through backend → LiveKit `SendData` (partly superseded by 017: clients may publish data, chat stays server-only) | Server-side rate limit/validation | Client data channels (unenforceable limits, spoofing) |
 | 005 | SSE + Redis pub/sub for waiting room | One-way push, works across replicas, plain HTTP | Polling (load), WebSocket (unneeded bidirectional) |
 | 006 | Redis GCRA (`redis_rate`) | Atomic Lua, distributed, smooth bursts | Fixed window (burst at edges), in-memory (per-instance) |
 | 007 | `gobreaker/v2` around LiveKit only | External network dep; DB/Redis covered by pools/timeouts | Breakers everywhere (masks outages) |
@@ -666,9 +669,12 @@ Full ADRs go in `docs/adr/NNNN-*.md` in Phase 1 review.
 | 010 | Stdlib-first config (`os.LookupEnv` + validation) | Avoid dependency for ~30 vars | viper/envconfig |
 | 011 | Migrations run by one-shot container | Avoid replicas racing migrations | Migrate on API boot |
 | 012 | `moderation` is a table-less orchestrator; owners write state + audit | Atomic state+audit without cross-module writes | Moderation writing `participants` |
-| 013 | Seats claimed at token time via 2-min lease + `in_room` | Closed tabs/scripted joins can't hold capacity | Counting `admitted` rows |
+| 013 | Seats claimed at token time via 2-min lease + `in_room` | Closed tabs/scripted joins can't hold leases; bounds tokens per network | Counting `admitted` rows |
 | 014 | `auto_create: false` + webhook guard + DB-driven reconciler | Removed/ended users can't re-enter via refreshed tokens; nothing lost on crash | In-memory retry queue |
 | 015 | Per-replica `PSUBSCRIBE` hub for SSE | O(1) Redis connections per replica | One subscription per stream |
+| 016 | No participant cap; host gates entry with lock / waiting room | Product requirement: anyone with the link can join | Fixed `max_participants` |
+| 017 | Reactions and whiteboard over LiveKit data messages, verified by receivers against server-signed roles | Drawing needs low latency; no new server component | Server relay (latency, load), CRDT service (overkill) |
+| 018 | Recording in the host's browser (screen capture + MediaRecorder), downloaded locally | No extra infrastructure or storage; everyone sees an indicator | LiveKit Egress (heavy service plus object storage); can be added later |
 
 ### Dependency list (each justified)
 
@@ -732,8 +738,8 @@ with 3 simulcast layers, screen share 1080p/15fps.
 | Level | What | How |
 | --- | --- | --- |
 | Unit | meeting creation/validation, expiry, `access.Can` matrix, host authz in services, token claims/TTL, code generator entropy/format, rate-limit policy selection, breaker state transitions, retry classification | Table-driven, fakes for ports, fake clock |
-| Integration | sqlc repositories, admission capacity under concurrency, `SKIP LOCKED` expiry with 2 workers, Redis GCRA limits, pub/sub SSE, LiveKit webhook verification, LiveKit adapter against a real `livekit-server --dev` container | `testcontainers-go`, build tag `integration` |
-| Concurrency | N goroutines joining a meeting at capacity; parallel admit/deny; concurrent rate-limit hits | `-race`, `t.Parallel`, `errgroup` |
+| Integration | sqlc repositories, per-origin lease cap under concurrency, no-cap joins, `SKIP LOCKED` expiry with 2 workers, Redis GCRA limits, pub/sub SSE, LiveKit webhook verification, LiveKit adapter against a real `livekit-server --dev` container | `testcontainers-go`, build tag `integration` |
+| Concurrency | N goroutines claiming tokens from one network; parallel admit/deny; concurrent rate-limit hits | `-race`, `t.Parallel`, `errgroup` |
 | Frontend | stores, API client, hooks, key components | Vitest + Testing Library |
 | E2E | create → join (2 browsers) → media connected → chat → remove → end | Playwright with fake media devices (Phase 6) |
 
@@ -806,7 +812,6 @@ or recorded in `docs/review-log.md` with justification.
 | `LIVEKIT_TOKEN_TTL` | `2m` | Also the seat lease |
 | `ORIGIN_HASH_KEY` | — | Secret HMAC key for `origin_hash` (≥ 32 bytes in production) |
 | `MEETING_DEFAULT_TTL` / `MEETING_MAX_TTL` | `24h` / `168h` | |
-| `MEETING_MAX_PARTICIPANTS` | `50` | |
 | `MEETING_RETENTION` | `168h` | Hard-delete ended meetings after |
 | `RATE_LIMIT_*` | see §10 | One var per policy, e.g. `RATE_LIMIT_CREATE=10/h` |
 | `TRUSTED_PROXY_CIDRS` | `172.30.0.10/32` (dev) | Nginx only; **required** in production |
@@ -838,8 +843,9 @@ or recorded in `docs/review-log.md` with justification.
   entry is), `participants.origin_hash`, `meetings.room_created_at` and
   `meetings.sweep_after`, plus partial indexes for the workers.
   `moderation_events.actor_id` is nullable (NULL means a system action).
-- **Admitted cap:** at most 4× capacity, counting only guests active in
-  the last 30 minutes.
+- **No participant cap** (migration 000002): meetings accept any number of
+  guests; scripted joins are bounded by the per-IP join rate limit and the
+  per-origin lease caps, and the host can lock the meeting.
 - **LiveKit client:** the API uses the `livekit/protocol` Twirp client
   directly instead of `server-sdk-go`, which would pull in a WebRTC client
   stack.
@@ -847,5 +853,8 @@ or recorded in `docs/review-log.md` with justification.
   `migrate` service.
 - **Port names in code:** `Participants`, `Room`, `TokenSigner`,
   `SeatStore` and similar. See each module's `service.go`.
+- **Data publishing:** tokens now allow data publishing (ADR-017). This
+  replaces part of ADR-004: chat still goes through the API, but reactions
+  and the whiteboard are peer to peer.
 - **ADRs:** summarised in §14. The review history is in
   `docs/review-log.md`.

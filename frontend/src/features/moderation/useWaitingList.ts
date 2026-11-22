@@ -1,7 +1,8 @@
-import { useDataChannel } from '@livekit/components-react';
+import { useRoomContext } from '@livekit/components-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/shared/api/meetings';
 import type { Participant } from '@/shared/api/types';
+import { onServerData } from '@/features/room/data';
 
 const FALLBACK_REFRESH_MS = 20_000;
 const SIGNAL_DEBOUNCE_MS = 500;
@@ -35,10 +36,14 @@ export function useWaitingList(code: string): WaitingList {
     };
   }, [refresh]);
 
-  useDataChannel('lamma.waiting', (msg) => {
-    if (msg.from) return; // only the server may signal
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(refresh, SIGNAL_DEBOUNCE_MS);
-  });
+  const room = useRoomContext();
+  useEffect(
+    () =>
+      onServerData(room, 'lamma.waiting', () => {
+        clearTimeout(debounce.current);
+        debounce.current = setTimeout(refresh, SIGNAL_DEBOUNCE_MS);
+      }),
+    [room, refresh],
+  );
   return { waiting, refresh };
 }

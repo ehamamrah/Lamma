@@ -16,8 +16,17 @@ monolith handles meetings, permissions, chat and moderation.
   (`xxxx-xxxx-xxxx`) and a shareable URL, and you become the host.
 - Join by name, with an optional meeting password and an optional waiting room.
 - Audio, video, screen share, a participant list and chat.
+- No participant limit: anyone with the link can join. The host can lock
+  the meeting (no new joiners) or turn on the waiting room (approval only).
 - Host controls: admit, deny or deny all waiting; mute; remove; lock;
   toggle the waiting room; end the meeting for everyone.
+- Emoji reactions that float over the video.
+- A shared whiteboard. The host draws alone ("Only me") or makes it
+  collaborative, where guests ask to draw and the host approves each one.
+- Recording (host, desktop browsers): records the meeting tab with everyone's
+  audio and downloads it as a file. Everyone sees a "Recording" indicator.
+- Works on phones: a compact control bar with a "More" sheet, and a tap to
+  enable sound when the browser blocks autoplay.
 - Meetings expire (24 h by default, configurable) and are cleaned up
   automatically.
 

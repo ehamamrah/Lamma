@@ -17,6 +17,7 @@ import {
 } from './protocol';
 
 const store = () => useCollabStore.getState();
+const HELLO_RETRIES_MS = [1_500, 4_000];
 
 /**
  * Keeps recording and whiteboard state in sync over LiveKit data messages.
@@ -58,7 +59,7 @@ export interface Gates {
 export const createGates = (): Gates => ({
   board: createRateGate(40, 1_000),
   guest: createRateGate(10, 10_000),
-  hello: createRateGate(3, 60_000),
+  hello: createRateGate(6, 60_000),
   helloAll: createRateGate(5, 1_000),
 });
 
@@ -130,9 +131,16 @@ function broadcastHostState(room: Room) {
 
 /** Guest: ask the host for state on connect and whenever a host (re)joins. */
 function greetHosts(room: Room) {
-  const hello = () => {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const send = () => {
     const to = hostIdentities(room);
     if (to.length > 0) void publish(room, TOPIC.guest, { t: 'hello' }, { to });
+  };
+  // A hello that reaches the host before it has registered us is dropped
+  // (unknown sender), so ask again shortly after. Replies are idempotent.
+  const hello = () => {
+    send();
+    for (const ms of HELLO_RETRIES_MS) timers.push(setTimeout(send, ms));
   };
   const onJoin = (p: RemoteParticipant) => isHostParticipant(p) && hello();
   // The host's browser holds the board. When it leaves, drop our copy, so a
@@ -143,6 +151,7 @@ function greetHosts(room: Room) {
   room.on(RoomEvent.ParticipantDisconnected, onLeave);
   if (room.state === ConnectionState.Connected) hello();
   return () => {
+    timers.forEach(clearTimeout);
     room.off(RoomEvent.Connected, hello);
     room.off(RoomEvent.ParticipantConnected, onJoin);
     room.off(RoomEvent.ParticipantDisconnected, onLeave);

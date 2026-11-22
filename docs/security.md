@@ -49,7 +49,7 @@ participants cannot change), so receivers can trust who sent what:
 
 - **Flood limits** (receive side): strokes 40 messages/s per drawer; board
   budgets of 2,000 points per stroke, 300 strokes per author and 200,000
-  points in total; snapshot requests 3/min per guest and 5/s overall (the
+  points in total; snapshot requests 6/min per guest and 5/s overall (the
   host caches the serialised board); reactions 5 per 3 s per sender and 10/s
   overall. The board redraws at most once per animation frame.
 
